@@ -9,13 +9,13 @@ Experimental [chDB](https://github.com/auxten/chdb) FFI bindings for Rust
 ### Status
 
 - experimental, unstable, subject to changes
-- requires [`libchdb.so`](https://github.com/metrico/libchdb/releases) on the system
+- requires [`libchdb`](https://github.com/metrico/libchdb) on the system
 - ffi hack for testing. not a proper library or crate!
 
 #### Build binding
 ```bash
-rust build
-rust run
+cargo build
+cargo run
 ```
 
 
