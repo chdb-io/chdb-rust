@@ -18,4 +18,4 @@ cargo build
 cargo run
 ```
 
-
+:wave: _Rust developer? Jump in and help us evolve this example into a stable crate!_
