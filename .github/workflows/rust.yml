@@ -16,8 +16,8 @@ jobs:
     - uses: actions/checkout@v3
     - name: Fetch library
       run: |
-          sudo wget https://github.com/metrico/libchdb/releases/latest/download/libchdb_amd64.zip
-          sudo unzip libchdb_amd64.zip
+          sudo wget https://github.com/metrico/libchdb/releases/latest/download/libchdb.zip
+          sudo unzip libchdb.zip
           sudo mv libchdb.so /usr/lib/libchdb.so
           sudo ldconfig
     - name: Build
