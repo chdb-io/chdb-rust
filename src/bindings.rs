@@ -9,7 +9,7 @@ struct local_result {
     size: usize,
 }
 
-#[link(name = "chdb")] // Replace "chdb" with the actual library name
+#[link(name = "chdb")] 
 extern "C" {
     fn query_stable(argc: i32, argv: *const *const c_char) -> *mut local_result;
 }
