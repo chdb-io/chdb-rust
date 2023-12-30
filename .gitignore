@@ -1,0 +1,8 @@
+/target
+/Cargo.lock
+*.tar.gz
+*.so
+*.h
+var
+udf
+*.parquet
