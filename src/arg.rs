@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::ffi::CString;
 
 use crate::error::Error;
-use crate::format::InputFormat;
 use crate::format::OutputFormat;
 use crate::log_level::LogLevel;
 
@@ -10,12 +9,8 @@ use crate::log_level::LogLevel;
 pub enum Arg<'a> {
     /// --config-file=<value>
     ConfigFilePath(Cow<'a, str>),
-    /// --database=<value>
-    Database(Cow<'a, str>),
     /// --log-level=<value>
     LogLevel(LogLevel),
-    /// --input-format=<value>
-    InputFormat(InputFormat),
     /// --output-format=<value>
     OutputFormat(OutputFormat),
     /// --multiquery
@@ -39,9 +34,7 @@ impl<'a> Arg<'a> {
     pub(crate) fn to_cstring(&self) -> Result<CString, Error> {
         Ok(match self {
             Self::ConfigFilePath(v) => CString::new(format!("--config-file={}", v)),
-            Self::Database(v) => CString::new(format!("--database={}", v)),
             Self::LogLevel(v) => CString::new(format!("--log-level={}", v.as_str())),
-            Self::InputFormat(v) => CString::new(format!("--input-format={}", v.as_str())),
             Self::OutputFormat(v) => CString::new(format!("--output-format={}", v.as_str())),
             Self::MultiQuery => CString::new("-n"),
             Self::Custom(k, v) => match v {

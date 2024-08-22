@@ -131,6 +131,7 @@ pub enum OutputFormat {
     RawBLOB,
     MsgPack,
     Markdown,
+    Vertical,
 }
 
 impl InputFormat {
@@ -274,6 +275,7 @@ impl OutputFormat {
             Self::RawBLOB => "RawBLOB",
             Self::MsgPack => "MsgPack",
             Self::Markdown => "Markdown",
+            Self::Vertical => "Vertical",
         }
     }
 }
