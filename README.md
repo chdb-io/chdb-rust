@@ -13,5 +13,4 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust
 ```bash
 ./update_libchdb.sh
 RUST_BACKTRACE=full cargo build --verbose
-cargo run --example basic
 ```

@@ -1,5 +1,7 @@
 
 #!/bin/bash
+set -e
+cd $(dirname "${BASH_SOURCE[0]}")
 
 # Get the newest release version
 LATEST_RELEASE=$(curl --silent "https://api.github.com/repos/chdb-io/chdb/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
