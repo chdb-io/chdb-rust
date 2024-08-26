@@ -4,11 +4,10 @@ fn main() {
     // Tell cargo to look for shared libraries in the specified directory
     println!("cargo:rustc-link-search=./");
 
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
+    // Tell cargo to tell rustc to link the system chdb library.
     println!("cargo:rustc-link-lib=chdb");
 
-    // Tell cargo to invalidate the built crate whenever the wrapper changes
+    // Tell cargo to invalidate the built crate whenever the wrapper changes.
     println!("cargo:rerun-if-changed=chdb.h");
 
     // The bindgen::Builder is the main entry point
@@ -20,7 +19,7 @@ fn main() {
         .header("chdb.h")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         // Finish the builder and generate the bindings.
         .generate()
         // Unwrap the Result and panic on failure.

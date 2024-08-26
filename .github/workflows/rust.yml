@@ -25,6 +25,6 @@ jobs:
       env:
         RUST_BACKTRACE: full
     - name: Run tests
-      run: cargo run --example basic
+      run: cargo test
       env:
         RUST_BACKTRACE: full

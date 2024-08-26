@@ -4,6 +4,7 @@
 
 # chdb-rust <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d5/Rust_programming_language_black_logo.svg/1024px-Rust_programming_language_black_logo.svg.png" height=20 />
 Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust
+
 ### Status
 
 - Experimental, unstable, subject to changes
@@ -13,5 +14,10 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust
 ```bash
 ./update_libchdb.sh
 RUST_BACKTRACE=full cargo build --verbose
-cargo run --example basic
 ```
+
+### Run tests
+`cargo test`
+
+### Examples
+See `tests` directory.
