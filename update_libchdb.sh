@@ -5,7 +5,7 @@ cd $(dirname "${BASH_SOURCE[0]}")
 
 # Get the newest release version
 # LATEST_RELEASE=$(curl --silent "https://api.github.com/repos/chdb-io/chdb/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-LATEST_RELEASE=v2.2.0b1
+LATEST_RELEASE=v2.0.4
 
 # Download the correct version based on the platform
 case "$(uname -s)" in
