@@ -29,7 +29,7 @@ download_and_extract() {
 }
 
 # Get the newest release version
-LATEST_RELEASE=v2.1.1
+LATEST_RELEASE=v3.1.2
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
@@ -66,15 +66,9 @@ if ! download_and_extract "$DOWNLOAD_URL"; then
     fi
 fi
 
-# check if --local flag is passed
-if [[ "$1" == "--local" ]]; then
-    # Set execute permission for libchdb.so
-    chmod +x libchdb.so
+chmod +x libchdb.so
 
-    # Clean up
-    rm -f libchdb.tar.gz
-    exit 0
-elif [[ "$1" == "--global" ]]; then
+if [[ "$1" == "--global" ]]; then
   # If current uid is not 0, check if sudo is available and request the user to input the password
   if [[ $EUID -ne 0 ]]; then
       command -v sudo >/dev/null 2>&1 || { echo >&2 "This script requires sudo privileges but sudo is not installed. Aborting."; exit 1; }
@@ -119,13 +113,7 @@ elif [[ "$1" == "--global" ]]; then
       ${SUDO} ldconfig
   fi
 
-  # Clean up
-  rm -f libchdb.tar.gz libchdb.so chdb.h
-
   GREENECHO "Installation completed successfully." ; ENDECHO
   GREENECHO "If any error occurred, please report it to:" ; ENDECHO
   GREENECHO "    https://github.com/chdb-io/chdb/issues/new/choose" ; ENDECHO
-else
-  echo "Invalid option. Use --local to install locally or --global to install globally."
-  exit 1
 fi
