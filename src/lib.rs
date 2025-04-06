@@ -17,9 +17,10 @@ use std::ffi::{c_char, CString};
 
 use crate::arg::Arg;
 use crate::error::Error;
+use crate::error::Result;
 use crate::query_result::QueryResult;
 
-pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<Option<QueryResult>, Error> {
+pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
     let mut argv = Vec::with_capacity(query_args.as_ref().map_or(0, |v| v.len()) + 2);
     argv.push(arg_clickhouse()?.into_raw());
 
@@ -33,26 +34,28 @@ pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<Option<QueryRe
     call_chdb(argv)
 }
 
-fn call_chdb(mut argv: Vec<*mut c_char>) -> Result<Option<QueryResult>, Error> {
+fn call_chdb(mut argv: Vec<*mut c_char>) -> Result<QueryResult> {
     let argc = argv.len() as i32;
     let argv = argv.as_mut_ptr();
     let result_ptr = unsafe { bindings::query_stable_v2(argc, argv) };
 
     if result_ptr.is_null() {
-        return Ok(None);
+        return Err(Error::NoResult);
     }
+    let result = QueryResult::new(result_ptr);
+    let result = result.check_error()?;
 
-    Ok(Some(QueryResult(result_ptr).check_error()?))
+    Ok(result)
 }
 
-fn arg_clickhouse() -> Result<CString, Error> {
+fn arg_clickhouse() -> Result<CString> {
     Ok(CString::new("clickhouse")?)
 }
 
-fn arg_data_path(value: &str) -> Result<CString, Error> {
+fn arg_data_path(value: &str) -> Result<CString> {
     Ok(CString::new(format!("--path={}", value))?)
 }
 
-fn arg_query(value: &str) -> Result<CString, Error> {
+fn arg_query(value: &str) -> Result<CString> {
     Ok(CString::new(format!("--query={}", value))?)
 }
