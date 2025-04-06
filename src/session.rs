@@ -82,11 +82,7 @@ impl<'a> Default for SessionBuilder<'a> {
 }
 
 impl Session {
-    pub fn execute(
-        &self,
-        query: &str,
-        query_args: Option<&[Arg]>,
-    ) -> Result<Option<QueryResult>, Error> {
+    pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult, Error> {
         let mut argv = Vec::with_capacity(
             self.default_args.len() + query_args.as_ref().map_or(0, |v| v.len()) + 1,
         );

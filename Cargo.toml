@@ -9,3 +9,6 @@ thiserror = "1"
 
 [build-dependencies]
 bindgen = "0.70.1"
+
+[dev-dependencies]
+tempdir = "0.3.7"
