@@ -5,17 +5,23 @@ use std::time::Duration;
 
 use crate::bindings;
 use crate::error::Error;
-
+use crate::error::Result;
 #[derive(Clone)]
-pub struct QueryResult(pub(crate) *mut bindings::local_result_v2);
+pub struct QueryResult {
+    inner: *mut bindings::local_result_v2,
+}
 
 impl QueryResult {
-    pub fn data_utf8(&self) -> Result<String, Error> {
-        String::from_utf8(self.data_ref().to_vec())
-            .map_err(|e| Error::NonUtf8Sequence(e.to_string()))
+    pub(crate) fn new(inner: *mut bindings::local_result_v2) -> Self {
+        Self { inner }
+    }
+    pub fn data_utf8(&self) -> Result<String> {
+        let buf = self.data_ref();
+
+        String::from_utf8(buf.to_vec()).map_err(Error::NonUtf8Sequence)
     }
 
-    pub fn data_utf8_lossy<'a>(&'a self) -> Cow<'a, str> {
+    pub fn data_utf8_lossy(&self) -> Cow<str> {
         String::from_utf8_lossy(self.data_ref())
     }
 
@@ -24,30 +30,37 @@ impl QueryResult {
     }
 
     pub fn data_ref(&self) -> &[u8] {
-        let buf = unsafe { (*self.0).buf };
-        let len = unsafe { (*self.0).len };
+        let inner = self.inner;
+        let buf = unsafe { (*inner).buf };
+        let len = unsafe { (*inner).len };
         let bytes: &[u8] = unsafe { slice::from_raw_parts(buf as *const u8, len) };
         bytes
     }
 
     pub fn rows_read(&self) -> u64 {
-        (unsafe { *self.0 }).rows_read
+        let inner = self.inner;
+        unsafe { *inner }.rows_read
     }
 
     pub fn bytes_read(&self) -> u64 {
-        unsafe { (*self.0).bytes_read }
+        let inner = self.inner;
+        unsafe { *inner }.bytes_read
     }
 
     pub fn elapsed(&self) -> Duration {
-        let elapsed = unsafe { (*self.0).elapsed };
+        let elapsed = unsafe { (*self.inner).elapsed };
         Duration::from_secs_f64(elapsed)
     }
 
-    pub(crate) fn check_error(self) -> Result<Self, Error> {
-        let err_ptr = unsafe { (*self.0).error_message };
+    pub(crate) fn check_error(self) -> Result<Self> {
+        self.check_error_ref()?;
+        Ok(self)
+    }
+    pub(crate) fn check_error_ref(&self) -> Result<()> {
+        let err_ptr = unsafe { (*self.inner).error_message };
 
         if err_ptr.is_null() {
-            return Ok(self);
+            return Ok(());
         }
 
         Err(Error::QueryError(unsafe {
@@ -58,6 +71,6 @@ impl QueryResult {
 
 impl Drop for QueryResult {
     fn drop(&mut self) {
-        unsafe { bindings::free_result_v2(self.0) };
+        unsafe { bindings::free_result_v2(self.inner) };
     }
 }
