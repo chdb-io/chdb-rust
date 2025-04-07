@@ -16,7 +16,9 @@ jobs:
     - uses: actions/checkout@v3
     - name: Fetch library
       run: |
-          wget https://github.com/chdb-io/chdb/releases/latest/download/linux-x86_64-libchdb.tar.gz
+          #wget https://github.com/chdb-io/chdb/releases/latest/download/linux-x86_64-libchdb.tar.gz
+          #Fix libchdb version to v2.1.1 until libchdb v3 based chdb-rust refactor
+          wget https://github.com/chdb-io/chdb/releases/download/v2.1.1/linux-x86_64-libchdb.tar.gz
           tar -xzf linux-x86_64-libchdb.tar.gz
           sudo mv libchdb.so /usr/lib/libchdb.so
           sudo ldconfig
