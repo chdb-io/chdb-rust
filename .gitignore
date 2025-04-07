@@ -2,7 +2,7 @@
 Cargo.lock
 *.tar.gz
 *.so
-*.h
+chdb.h
 var
 udf
 *.parquet
