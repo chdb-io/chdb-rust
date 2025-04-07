@@ -29,7 +29,7 @@ download_and_extract() {
 }
 
 # Get the newest release version
-LATEST_RELEASE=v3.1.2
+LATEST_RELEASE=v2.1.1
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
