@@ -21,7 +21,7 @@ impl QueryResult {
         String::from_utf8(buf.to_vec()).map_err(Error::NonUtf8Sequence)
     }
 
-    pub fn data_utf8_lossy(&self) -> Cow<str> {
+    pub fn data_utf8_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(self.data_ref())
     }
 
