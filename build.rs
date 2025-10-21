@@ -58,7 +58,7 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    let version = "v2.1.1";
+    let version = "v3.6.0";
     let url = format!(
         "https://github.com/chdb-io/chdb/releases/download/{}/{}",
         version, platform
