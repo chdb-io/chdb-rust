@@ -9,21 +9,28 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust
 ## Status
 
 - Experimental, unstable, subject to changes
-- Requires [`libchdb`](https://github.com/chdb-io/chdb) on the system. You can install the compatible version from
-  `install_libchdb.sh`
+- Automatically downloads and manages [`libchdb`](https://github.com/chdb-io/chdb) dependencies during build
 
 ## Usage
 
-### Install libchdb
+The library automatically downloads the required `libchdb` binary during the build process.
 
-You can install it system-wide
+### Supported platforms:
+- Linux x86_64
+- Linux aarch64  
+- macOS x86_64
+- macOS arm64 (Apple Silicon)
 
+### Manual Installation (Optional)
+
+If you prefer to install `libchdb` manually, you can:
+
+Install it system-wide:
 ```bash
 ./update_libchdb.sh --global
 ```
 
-or use it in a local directory
-
+Or use it in a local directory:
 ```bash
 ./update_libchdb.sh --local
 ```
