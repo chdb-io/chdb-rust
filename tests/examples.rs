@@ -73,3 +73,9 @@ fn test_stateless() -> Result<()> {
     assert_eq!(result.data_utf8_lossy(), "{\"id\":1,\"msg\":\"test\"}\n");
     Ok(())
 }
+
+#[test]
+fn test_sql_syntax_error() {
+    let result = execute("aaa", Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]));
+    assert!(result.is_err(), "Expected error for invalid SQL");
+}

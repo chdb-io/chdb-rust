@@ -1,25 +1,23 @@
-use std::ffi::CString;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::arg::Arg;
-use crate::arg_clickhouse;
-use crate::arg_data_path;
-use crate::arg_query;
-use crate::call_chdb;
+use crate::connection::Connection;
 use crate::error::Error;
+use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
 
 pub struct SessionBuilder<'a> {
     data_path: PathBuf,
-    default_args: Vec<Arg<'a>>,
+    default_format: OutputFormat,
+    _marker: std::marker::PhantomData<&'a ()>,
     auto_cleanup: bool,
 }
 
-#[derive(Clone)]
 pub struct Session {
-    default_args: Vec<CString>,
+    conn: Connection,
     data_path: String,
+    default_format: OutputFormat,
     auto_cleanup: bool,
 }
 
@@ -30,7 +28,8 @@ impl<'a> SessionBuilder<'a> {
 
         Self {
             data_path,
-            default_args: Vec::new(),
+            default_format: OutputFormat::TabSeparated,
+            _marker: std::marker::PhantomData,
             auto_cleanup: false,
         }
     }
@@ -41,7 +40,10 @@ impl<'a> SessionBuilder<'a> {
     }
 
     pub fn with_arg(mut self, arg: Arg<'a>) -> Self {
-        self.default_args.push(arg);
+        // Only OutputFormat is supported with the new API
+        if let Some(fmt) = arg.as_output_format() {
+            self.default_format = fmt;
+        }
         self
     }
 
@@ -59,23 +61,18 @@ impl<'a> SessionBuilder<'a> {
             return Err(Error::InsufficientPermissions);
         }
 
-        let mut default_args = Vec::with_capacity(self.default_args.len() + 2);
-        default_args.push(arg_clickhouse()?);
-        default_args.push(arg_data_path(&data_path)?);
-
-        for default_arg in self.default_args {
-            default_args.push(default_arg.to_cstring()?);
-        }
+        let conn = Connection::open_with_path(&data_path)?;
 
         Ok(Session {
+            conn,
             data_path,
-            default_args,
+            default_format: self.default_format,
             auto_cleanup: self.auto_cleanup,
         })
     }
 }
 
-impl<'a> Default for SessionBuilder<'a> {
+impl Default for SessionBuilder<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -83,22 +80,10 @@ impl<'a> Default for SessionBuilder<'a> {
 
 impl Session {
     pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult, Error> {
-        let mut argv = Vec::with_capacity(
-            self.default_args.len() + query_args.as_ref().map_or(0, |v| v.len()) + 1,
-        );
-
-        for arg in &self.default_args {
-            argv.push(arg.clone().into_raw())
-        }
-
-        if let Some(args) = query_args {
-            for arg in args {
-                argv.push(arg.to_cstring()?.into_raw());
-            }
-        }
-
-        argv.push(arg_query(query)?.into_raw());
-        call_chdb(argv)
+        let fmt = query_args
+            .and_then(|args| args.iter().find_map(|a| a.as_output_format()))
+            .unwrap_or(self.default_format);
+        self.conn.query(query, fmt)
     }
 }
 

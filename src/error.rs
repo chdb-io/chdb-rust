@@ -7,6 +7,8 @@ pub enum Error {
     Unknown,
     #[error("No result")]
     NoResult,
+    #[error("Connection failed")]
+    ConnectionFailed,
     #[error("Invalid data: {0}")]
     InvalidData(String),
     #[error("Invalid path")]

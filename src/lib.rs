@@ -7,55 +7,21 @@ pub mod arg;
     non_upper_case_globals
 )]
 mod bindings;
+mod connection;
 pub mod error;
 pub mod format;
 pub mod log_level;
 pub mod query_result;
 pub mod session;
 
-use std::ffi::{c_char, CString};
-
-use crate::arg::Arg;
-use crate::error::Error;
+use crate::arg::{extract_output_format, Arg};
+use crate::connection::Connection;
 use crate::error::Result;
 use crate::query_result::QueryResult;
 
+/// Execute a one-off query using an in-memory connection.
 pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
-    let mut argv = Vec::with_capacity(query_args.as_ref().map_or(0, |v| v.len()) + 2);
-    argv.push(arg_clickhouse()?.into_raw());
-
-    if let Some(args) = query_args {
-        for arg in args {
-            argv.push(arg.to_cstring()?.into_raw());
-        }
-    }
-
-    argv.push(arg_query(query)?.into_raw());
-    call_chdb(argv)
-}
-
-fn call_chdb(mut argv: Vec<*mut c_char>) -> Result<QueryResult> {
-    let argc = argv.len() as i32;
-    let argv = argv.as_mut_ptr();
-    let result_ptr = unsafe { bindings::query_stable_v2(argc, argv) };
-
-    if result_ptr.is_null() {
-        return Err(Error::NoResult);
-    }
-    let result = QueryResult::new(result_ptr);
-    let result = result.check_error()?;
-
-    Ok(result)
-}
-
-fn arg_clickhouse() -> Result<CString> {
-    Ok(CString::new("clickhouse")?)
-}
-
-fn arg_data_path(value: &str) -> Result<CString> {
-    Ok(CString::new(format!("--path={}", value))?)
-}
-
-fn arg_query(value: &str) -> Result<CString> {
-    Ok(CString::new(format!("--query={}", value))?)
+    let conn = Connection::open_in_memory()?;
+    let fmt = extract_output_format(query_args);
+    conn.query(query, fmt)
 }

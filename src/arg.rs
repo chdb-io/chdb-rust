@@ -31,6 +31,7 @@ pub enum Arg<'a> {
 }
 
 impl<'a> Arg<'a> {
+    #[allow(dead_code)]
     pub(crate) fn to_cstring(&self) -> Result<CString, Error> {
         Ok(match self {
             Self::ConfigFilePath(v) => CString::new(format!("--config-file={}", v)),
@@ -43,4 +44,18 @@ impl<'a> Arg<'a> {
             },
         }?)
     }
+
+    /// Extract OutputFormat from an Arg if it is an OutputFormat variant.
+    pub(crate) fn as_output_format(&self) -> Option<OutputFormat> {
+        match self {
+            Self::OutputFormat(f) => Some(*f),
+            _ => None,
+        }
+    }
+}
+
+/// Extract OutputFormat from a slice of Args, returns the first one found or default.
+pub(crate) fn extract_output_format(args: Option<&[Arg]>) -> OutputFormat {
+    args.and_then(|args| args.iter().find_map(|a| a.as_output_format()))
+        .unwrap_or(OutputFormat::TabSeparated)
 }
