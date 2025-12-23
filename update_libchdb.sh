@@ -29,7 +29,7 @@ download_and_extract() {
 }
 
 # Get the newest release version
-LATEST_RELEASE=v2.1.1
+LATEST_RELEASE=v3.7.2
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
@@ -67,6 +67,7 @@ if ! download_and_extract "$DOWNLOAD_URL"; then
 fi
 
 chmod +x libchdb.so
+rm -f chdb.hpp
 
 if [[ "$1" == "--global" ]]; then
   # If current uid is not 0, check if sudo is available and request the user to input the password

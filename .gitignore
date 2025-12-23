@@ -3,6 +3,8 @@ Cargo.lock
 *.tar.gz
 *.so
 chdb.h
+chdb.hpp
 var
 udf
 *.parquet
+.cargo/

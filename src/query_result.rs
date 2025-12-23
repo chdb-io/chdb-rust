@@ -6,18 +6,21 @@ use std::time::Duration;
 use crate::bindings;
 use crate::error::Error;
 use crate::error::Result;
-#[derive(Clone)]
+
 pub struct QueryResult {
-    inner: *mut bindings::local_result_v2,
+    inner: *mut bindings::chdb_result,
 }
 
+// Safety: QueryResult is safe to send between threads
+unsafe impl Send for QueryResult {}
+
 impl QueryResult {
-    pub(crate) fn new(inner: *mut bindings::local_result_v2) -> Self {
+    pub(crate) fn new(inner: *mut bindings::chdb_result) -> Self {
         Self { inner }
     }
+
     pub fn data_utf8(&self) -> Result<String> {
         let buf = self.data_ref();
-
         String::from_utf8(buf.to_vec()).map_err(Error::NonUtf8Sequence)
     }
 
@@ -30,25 +33,24 @@ impl QueryResult {
     }
 
     pub fn data_ref(&self) -> &[u8] {
-        let inner = self.inner;
-        let buf = unsafe { (*inner).buf };
-        let len = unsafe { (*inner).len };
-        let bytes: &[u8] = unsafe { slice::from_raw_parts(buf as *const u8, len) };
-        bytes
+        let buf = unsafe { bindings::chdb_result_buffer(self.inner) };
+        let len = unsafe { bindings::chdb_result_length(self.inner) };
+        if buf.is_null() || len == 0 {
+            return &[];
+        }
+        unsafe { slice::from_raw_parts(buf as *const u8, len) }
     }
 
     pub fn rows_read(&self) -> u64 {
-        let inner = self.inner;
-        unsafe { *inner }.rows_read
+        unsafe { bindings::chdb_result_rows_read(self.inner) }
     }
 
     pub fn bytes_read(&self) -> u64 {
-        let inner = self.inner;
-        unsafe { *inner }.bytes_read
+        unsafe { bindings::chdb_result_bytes_read(self.inner) }
     }
 
     pub fn elapsed(&self) -> Duration {
-        let elapsed = unsafe { (*self.inner).elapsed };
+        let elapsed = unsafe { bindings::chdb_result_elapsed(self.inner) };
         Duration::from_secs_f64(elapsed)
     }
 
@@ -56,21 +58,25 @@ impl QueryResult {
         self.check_error_ref()?;
         Ok(self)
     }
+
     pub(crate) fn check_error_ref(&self) -> Result<()> {
-        let err_ptr = unsafe { (*self.inner).error_message };
+        let err_ptr = unsafe { bindings::chdb_result_error(self.inner) };
 
         if err_ptr.is_null() {
             return Ok(());
         }
 
-        Err(Error::QueryError(unsafe {
-            CStr::from_ptr(err_ptr).to_string_lossy().to_string()
-        }))
+        let err_msg = unsafe { CStr::from_ptr(err_ptr).to_string_lossy().to_string() };
+        if err_msg.is_empty() {
+            return Ok(());
+        }
+
+        Err(Error::QueryError(err_msg))
     }
 }
 
 impl Drop for QueryResult {
     fn drop(&mut self) {
-        unsafe { bindings::free_result_v2(self.inner) };
+        unsafe { bindings::chdb_destroy_query_result(self.inner) };
     }
 }
