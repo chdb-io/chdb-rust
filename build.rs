@@ -24,16 +24,16 @@ fn find_libchdb_or_download(out_dir: &Path) -> Result<(PathBuf, PathBuf), Box<dy
     if let Some((lib_dir, header_path)) = find_existing_libchdb() {
         return Ok((lib_dir, header_path));
     }
-    
+
     println!("cargo:warning=libchdb not found locally, attempting to download...");
     download_libchdb_to_out_dir(out_dir)?;
     let lib_dir = out_dir.to_path_buf();
     let header_path = out_dir.join("chdb.h");
-    
+
     if !header_path.exists() {
         return Err("Header file not found after download".into());
     }
-    
+
     Ok((lib_dir, header_path))
 }
 
@@ -41,24 +41,24 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
     if Path::new("./libchdb.so").exists() && Path::new("./chdb.h").exists() {
         return Some((PathBuf::from("."), PathBuf::from("./chdb.h")));
     }
-    
+
     // Check system installation
     let system_lib_path = Path::new("/usr/local/lib");
     let system_header_path = Path::new("/usr/local/include/chdb.h");
-    
+
     if system_header_path.exists() {
         if system_lib_path.join("libchdb.so").exists() || 
            system_lib_path.join("libchdb.dylib").exists() {
             return Some((system_lib_path.to_path_buf(), system_header_path.to_path_buf()));
         }
     }
-    
+
     None
 }
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    let version = "v3.6.0";
+    let version = "v3.7.2";
     let url = format!(
         "https://github.com/chdb-io/chdb/releases/download/{}/{}",
         version, platform
