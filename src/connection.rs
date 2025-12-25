@@ -6,6 +6,7 @@ use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
 
 /// A connection to chDB database.
+#[derive(Debug)]
 pub struct Connection {
     // Pointer to chdb_connection (which is *mut chdb_connection_)
     inner: *mut bindings::chdb_connection,

@@ -14,6 +14,7 @@ pub struct SessionBuilder<'a> {
     auto_cleanup: bool,
 }
 
+#[derive(Debug)]
 pub struct Session {
     conn: Connection,
     data_path: String,

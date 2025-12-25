@@ -7,6 +7,7 @@ use crate::bindings;
 use crate::error::Error;
 use crate::error::Result;
 
+#[derive(Debug)]
 pub struct QueryResult {
     inner: *mut bindings::chdb_result,
 }

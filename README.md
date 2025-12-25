@@ -41,4 +41,6 @@ RUST_BACKTRACE=full cargo build --verbose
 
 ### Examples
 
-See `tests` directory.
+- **Runnable examples**: See the `examples/` directory. Run them with `cargo run --example <name>`
+- **Documentation**: See `docs/examples.md` for detailed examples and explanations
+- **Tests**: See `tests/` directory for test examples
