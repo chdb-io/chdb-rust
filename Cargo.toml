@@ -1,7 +1,13 @@
 [package]
 name = "chdb-rust"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
+authors = ["Auxten"]
+description = "chDB FFI bindings for Rust(Experimental)"
+homepage = "https://github.com/chdb-io/chdb-rust"
+repository = "https://github.com/chdb-io/chdb-rust"
+license = "Apache-2.0"
+readme = "README.md"
 keywords = ["clickhouse", "chdb", "database", "embedded", "analytics"]
 
 [dependencies]
@@ -9,6 +15,9 @@ thiserror = "1"
 
 [build-dependencies]
 bindgen = "0.70.1"
+reqwest = { version = "0.11", features = ["blocking"] }
+flate2 = "1.0"
+tar = "0.4"
 
 [dev-dependencies]
 tempdir = "0.3.7"
