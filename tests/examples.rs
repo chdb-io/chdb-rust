@@ -334,8 +334,6 @@ fn test_session_auto_cleanup() -> Result<()> {
         assert!(fs::metadata(&data_path).is_ok());
     } // Session dropped here, auto_cleanup should trigger
     
-    // Note: We can't easily verify the directory was deleted in a test,
-    // but we can verify the session worked correctly before drop
     // Check the folder was deleted
     assert!(fs::metadata(&data_path).is_err());
 
