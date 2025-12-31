@@ -1,3 +1,8 @@
+//! Query argument definitions for chDB.
+//!
+//! This module provides types for specifying query arguments such as output format,
+//! log level, and custom command-line arguments.
+
 use std::borrow::Cow;
 use std::ffi::CString;
 
@@ -5,13 +10,35 @@ use crate::error::Error;
 use crate::format::OutputFormat;
 use crate::log_level::LogLevel;
 
+/// Query arguments that can be passed when executing queries.
+///
+/// `Arg` represents various command-line arguments that can be used to configure
+/// query execution. Most commonly, you'll use `OutputFormat` to specify the
+/// desired output format.
+///
+/// # Examples
+///
+/// ```no_run
+/// use chdb_rust::arg::Arg;
+/// use chdb_rust::format::OutputFormat;
+/// use chdb_rust::log_level::LogLevel;
+///
+/// // Specify output format
+/// let args = &[Arg::OutputFormat(OutputFormat::JSONEachRow)];
+///
+/// // Specify log level
+/// let args = &[Arg::LogLevel(LogLevel::Debug)];
+///
+/// // Use custom arguments
+/// let args = &[Arg::Custom("path".into(), Some("/tmp/db".into()))];
+/// ```
 #[derive(Debug)]
 pub enum Arg<'a> {
-    /// --config-file=<value>
+    /// `--config-file=<value>`
     ConfigFilePath(Cow<'a, str>),
-    /// --log-level=<value>
+    /// `--log-level=<value>`
     LogLevel(LogLevel),
-    /// --output-format=<value>
+    /// `--output-format=<value>`
     OutputFormat(OutputFormat),
     /// --multiquery
     MultiQuery,
@@ -26,7 +53,7 @@ pub enum Arg<'a> {
     /// 2. Arg::Custom("multiline".into(), None).
     ///
     /// We should tell user where to look for officially supported arguments.
-    /// Here is some hint for now: https://github.com/fixcik/chdb-rs/blob/master/OPTIONS.md .
+    /// Here is some hint for now: <https://github.com/fixcik/chdb-rs/blob/master/OPTIONS.md>.
     Custom(Cow<'a, str>, Option<Cow<'a, str>>),
 }
 
@@ -45,7 +72,10 @@ impl<'a> Arg<'a> {
         }?)
     }
 
-    /// Extract OutputFormat from an Arg if it is an OutputFormat variant.
+    /// Extract `OutputFormat` from an `Arg` if it is an `OutputFormat` variant.
+    ///
+    /// This is a helper method used internally to extract output format information
+    /// from query arguments.
     pub(crate) fn as_output_format(&self) -> Option<OutputFormat> {
         match self {
             Self::OutputFormat(f) => Some(*f),
@@ -54,7 +84,18 @@ impl<'a> Arg<'a> {
     }
 }
 
-/// Extract OutputFormat from a slice of Args, returns the first one found or default.
+/// Extract `OutputFormat` from a slice of `Arg`s.
+///
+/// This function searches through the provided arguments and returns the first
+/// `OutputFormat` found, or the default `TabSeparated` format if none is found.
+///
+/// # Arguments
+///
+/// * `args` - Optional slice of query arguments
+///
+/// # Returns
+///
+/// Returns the first `OutputFormat` found, or `OutputFormat::TabSeparated` as default.
 pub(crate) fn extract_output_format(args: Option<&[Arg]>) -> OutputFormat {
     args.and_then(|args| args.iter().find_map(|a| a.as_output_format()))
         .unwrap_or(OutputFormat::TabSeparated)
