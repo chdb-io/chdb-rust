@@ -1,3 +1,13 @@
+//! Input and output format definitions for chDB queries.
+//!
+//! This module defines the various data formats supported by chDB for reading
+//! input data and formatting query results.
+
+/// Input formats for reading data into chDB.
+///
+/// These formats specify how data should be parsed when reading from files or
+/// other sources. See the [ClickHouse documentation](https://clickhouse.com/docs/en/interfaces/formats/)
+/// for details on each format.
 #[derive(Debug, Clone, Copy)]
 pub enum InputFormat {
     TabSeparated,
@@ -41,8 +51,6 @@ pub enum InputFormat {
     AvroConfluent,
     Parquet,
     ParquetMetadata,
-    Arrow,
-    ArrowStream,
     ORC,
     One,
     Npy,
@@ -61,6 +69,11 @@ pub enum InputFormat {
     Form,
 }
 
+/// Output formats for query results.
+///
+/// These formats specify how query results should be formatted when returned.
+/// See the [ClickHouse documentation](https://clickhouse.com/docs/en/interfaces/formats/)
+/// for details on each format.
 #[derive(Debug, Clone, Copy)]
 pub enum OutputFormat {
     TabSeparated,
@@ -116,8 +129,6 @@ pub enum OutputFormat {
     ProtobufList,
     Avro,
     Parquet,
-    Arrow,
-    ArrowStream,
     ORC,
     Npy,
     RowBinary,
@@ -135,6 +146,14 @@ pub enum OutputFormat {
 }
 
 impl InputFormat {
+    /// Get the string representation of the input format.
+    ///
+    /// This returns the format name as it should be used in SQL queries
+    /// (e.g., in `file()` function calls).
+    ///
+    /// # Returns
+    ///
+    /// Returns the format name as a static string slice.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TabSeparated => "TabSeparated",
@@ -180,8 +199,6 @@ impl InputFormat {
             Self::AvroConfluent => "AvroConfluent",
             Self::Parquet => "Parquet",
             Self::ParquetMetadata => "ParquetMetadata",
-            Self::Arrow => "Arrow",
-            Self::ArrowStream => "ArrowStream",
             Self::ORC => "ORC",
             Self::One => "One",
             Self::Npy => "Npy",
@@ -203,6 +220,13 @@ impl InputFormat {
 }
 
 impl OutputFormat {
+    /// Get the string representation of the output format.
+    ///
+    /// This returns the format name as it should be used when executing queries.
+    ///
+    /// # Returns
+    ///
+    /// Returns the format name as a static string slice.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TabSeparated => "TabSeparated",
@@ -260,8 +284,6 @@ impl OutputFormat {
             Self::ProtobufList => "ProtobufList",
             Self::Avro => "Avro",
             Self::Parquet => "Parquet",
-            Self::Arrow => "Arrow",
-            Self::ArrowStream => "ArrowStream",
             Self::ORC => "ORC",
             Self::Npy => "Npy",
             Self::RowBinary => "RowBinary",
