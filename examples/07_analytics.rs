@@ -1,30 +1,29 @@
-/// Example: Building a Simple Analytics Query
-/// 
-/// This is a complete example that demonstrates a typical analytics use case
-/// with event tracking, aggregation, and time-based queries.
-
-use chdb_rust::session::SessionBuilder;
 use chdb_rust::arg::Arg;
 use chdb_rust::format::OutputFormat;
+/// Example: Building a Simple Analytics Query
+///
+/// This is a complete example that demonstrates a typical analytics use case
+/// with event tracking, aggregation, and time-based queries.
+use chdb_rust::session::SessionBuilder;
 
 fn main() -> Result<(), chdb_rust::error::Error> {
     println!("=== Analytics Example ===\n");
-    
+
     // Create session
     let tmp_dir = std::env::temp_dir().join("chdb-analytics");
     let session = SessionBuilder::new()
         .with_data_path(tmp_dir)
         .with_auto_cleanup(true)
         .build()?;
-    
+
     println!("1. Creating database and table...");
-    
+
     // Create database and table
     session.execute(
         "CREATE DATABASE analytics; USE analytics",
-        Some(&[Arg::MultiQuery])
+        Some(&[Arg::MultiQuery]),
     )?;
-    
+
     session.execute(
         "CREATE TABLE events (
             id UInt64,
@@ -32,11 +31,11 @@ fn main() -> Result<(), chdb_rust::error::Error> {
             timestamp DateTime,
             value Float64
         ) ENGINE = MergeTree() ORDER BY timestamp",
-        None
+        None,
     )?;
-    
+
     println!("2. Inserting sample events...");
-    
+
     // Insert sample events
     session.execute(
         "INSERT INTO events VALUES
@@ -50,11 +49,11 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         (8, 'page_view', '2024-01-01 11:00:00', 1.0),
         (9, 'click', '2024-01-01 11:05:00', 3.0),
         (10, 'page_view', '2024-01-01 11:10:00', 1.0)",
-        None
+        None,
     )?;
-    
+
     println!("3. Event statistics by type:\n");
-    
+
     // Aggregate query
     let result = session.execute(
         "SELECT 
@@ -65,14 +64,14 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         FROM events
         GROUP BY event_type
         ORDER BY count DESC",
-        Some(&[Arg::OutputFormat(OutputFormat::Pretty)])
+        Some(&[Arg::OutputFormat(OutputFormat::Pretty)]),
     )?;
-    
+
     println!("{}", result.data_utf8_lossy());
     println!();
-    
+
     println!("4. Hourly event distribution:\n");
-    
+
     // Time-based query
     let result = session.execute(
         "SELECT 
@@ -81,14 +80,14 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         FROM events
         GROUP BY hour
         ORDER BY hour",
-        Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)])
+        Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
     )?;
-    
+
     println!("{}", result.data_utf8_lossy());
     println!();
-    
+
     println!("5. Conversion funnel:\n");
-    
+
     // Conversion funnel analysis
     let result = session.execute(
         "SELECT 
@@ -104,11 +103,10 @@ fn main() -> Result<(), chdb_rust::error::Error> {
                 WHEN 'purchase' THEN 3
                 ELSE 4
             END",
-        Some(&[Arg::OutputFormat(OutputFormat::Pretty)])
+        Some(&[Arg::OutputFormat(OutputFormat::Pretty)]),
     )?;
-    
+
     println!("{}", result.data_utf8_lossy());
-    
+
     Ok(())
 }
-

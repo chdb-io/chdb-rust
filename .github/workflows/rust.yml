@@ -19,6 +19,10 @@ jobs:
           bash update_libchdb.sh --local
           sudo mv libchdb.so /usr/lib/libchdb.so
           sudo ldconfig
+    - name: Check formatting
+      run: cargo fmt --check
+    - name: Check clippy
+      run: cargo clippy --all-targets --all-features -- --deny warnings
     - name: Build
       run: cargo build --verbose
       env:

@@ -61,13 +61,13 @@ impl<'a> Arg<'a> {
     #[allow(dead_code)]
     pub(crate) fn to_cstring(&self) -> Result<CString, Error> {
         Ok(match self {
-            Self::ConfigFilePath(v) => CString::new(format!("--config-file={}", v)),
+            Self::ConfigFilePath(v) => CString::new(format!("--config-file={v}")),
             Self::LogLevel(v) => CString::new(format!("--log-level={}", v.as_str())),
             Self::OutputFormat(v) => CString::new(format!("--output-format={}", v.as_str())),
             Self::MultiQuery => CString::new("-n"),
             Self::Custom(k, v) => match v {
                 None => CString::new(k.as_ref()),
-                Some(v) => CString::new(format!("--{}={}", k, v)),
+                Some(v) => CString::new(format!("--{k}={v}")),
             },
         }?)
     }
