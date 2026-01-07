@@ -92,10 +92,7 @@ fn test_output_formats() -> Result<()> {
     let query = "SELECT 1 AS a, 'test' AS b, 3.14 AS pi";
 
     // Test JSONEachRow
-    let result = execute(
-        query,
-        Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
-    )?;
+    let result = execute(query, Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]))?;
     let json_output = result.data_utf8_lossy();
     assert!(json_output.contains("\"a\":1"));
     assert!(json_output.contains("\"b\":\"test\""));
@@ -112,10 +109,7 @@ fn test_output_formats() -> Result<()> {
     assert!(!csv_output.is_empty());
 
     // Test Pretty format
-    let result = execute(
-        query,
-        Some(&[Arg::OutputFormat(OutputFormat::Pretty)]),
-    )?;
+    let result = execute(query, Some(&[Arg::OutputFormat(OutputFormat::Pretty)]))?;
     let pretty_output = result.data_utf8_lossy();
     assert!(!pretty_output.is_empty());
 
@@ -181,7 +175,6 @@ fn test_query_result_data_methods() -> Result<()> {
     )?;
     let bytes = result.data_ref();
     assert!(!bytes.is_empty());
-    assert!(bytes.len() > 0);
 
     Ok(())
 }
@@ -194,7 +187,10 @@ fn test_multiple_inserts_and_aggregation() -> Result<()> {
         .with_auto_cleanup(true)
         .build()?;
 
-    session.execute("CREATE DATABASE testdb; USE testdb", Some(&[Arg::MultiQuery]))?;
+    session.execute(
+        "CREATE DATABASE testdb; USE testdb",
+        Some(&[Arg::MultiQuery]),
+    )?;
 
     session.execute(
         "CREATE TABLE products (id UInt64, name String, price Float64) \
@@ -243,7 +239,10 @@ fn test_different_data_types() -> Result<()> {
         .with_auto_cleanup(true)
         .build()?;
 
-    session.execute("CREATE DATABASE testdb; USE testdb", Some(&[Arg::MultiQuery]))?;
+    session.execute(
+        "CREATE DATABASE testdb; USE testdb",
+        Some(&[Arg::MultiQuery]),
+    )?;
 
     session.execute(
         "CREATE TABLE types_test (
@@ -289,11 +288,9 @@ fn test_error_handling_table_not_found() {
 
     if let Err(e) = result {
         match e {
-            chdb_rust::error::Error::QueryError(_) => {
-                assert!(true);
-            },
+            chdb_rust::error::Error::QueryError(_) => {}
             _ => {
-                panic!("Expected QueryError, got {:?}", e);
+                panic!("Expected QueryError, got {e:?}");
             }
         }
     }
@@ -312,20 +309,23 @@ fn test_error_handling_invalid_syntax() {
 fn test_session_auto_cleanup() -> Result<()> {
     let tmp = tempdir::TempDir::new("chdb-rust")?;
     let data_path = tmp.path().to_path_buf();
-    
+
     {
         let session = SessionBuilder::new()
             .with_data_path(&data_path)
             .with_auto_cleanup(true)
             .build()?;
 
-        session.execute("CREATE DATABASE testdb; USE testdb", Some(&[Arg::MultiQuery]))?;
+        session.execute(
+            "CREATE DATABASE testdb; USE testdb",
+            Some(&[Arg::MultiQuery]),
+        )?;
         session.execute(
             "CREATE TABLE test (id UInt64) ENGINE = MergeTree() ORDER BY id",
             None,
         )?;
         session.execute("INSERT INTO test VALUES (1)", None)?;
-        
+
         // Session should exist and work
         let result = session.execute("SELECT COUNT(*) FROM test", None)?;
         assert_eq!(result.rows_read(), 1);
@@ -333,7 +333,7 @@ fn test_session_auto_cleanup() -> Result<()> {
         // Check the folder was created
         assert!(fs::metadata(&data_path).is_ok());
     } // Session dropped here, auto_cleanup should trigger
-    
+
     // Check the folder was deleted
     assert!(fs::metadata(&data_path).is_err());
 
@@ -348,7 +348,10 @@ fn test_complex_query_with_joins() -> Result<()> {
         .with_auto_cleanup(true)
         .build()?;
 
-    session.execute("CREATE DATABASE testdb; USE testdb", Some(&[Arg::MultiQuery]))?;
+    session.execute(
+        "CREATE DATABASE testdb; USE testdb",
+        Some(&[Arg::MultiQuery]),
+    )?;
 
     // Create orders table
     session.execute(
@@ -430,7 +433,10 @@ fn test_session_without_auto_cleanup() -> Result<()> {
         .with_auto_cleanup(false) // Explicitly disable cleanup
         .build()?;
 
-    session.execute("CREATE DATABASE testdb; USE testdb", Some(&[Arg::MultiQuery]))?;
+    session.execute(
+        "CREATE DATABASE testdb; USE testdb",
+        Some(&[Arg::MultiQuery]),
+    )?;
     session.execute(
         "CREATE TABLE test (id UInt64) ENGINE = MergeTree() ORDER BY id",
         None,
@@ -441,7 +447,7 @@ fn test_session_without_auto_cleanup() -> Result<()> {
     assert_eq!(result.rows_read(), 1);
 
     // Check the folder was not deleted
-    assert!(fs::metadata(&tmp.path()).is_ok());
+    assert!(fs::metadata(tmp.path()).is_ok());
 
     Ok(())
 }

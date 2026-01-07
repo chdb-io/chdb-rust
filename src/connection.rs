@@ -138,7 +138,7 @@ impl Connection {
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
     pub fn open_with_path(path: &str) -> Result<Self> {
-        let path_arg = format!("--path={}", path);
+        let path_arg = format!("--path={path}");
         Self::open(&["clickhouse", &path_arg])
     }
 
@@ -181,9 +181,8 @@ impl Connection {
 
         // chdb_query takes chdb_connection (which is *mut chdb_connection_)
         let conn = unsafe { *self.inner };
-        let result_ptr = unsafe {
-            bindings::chdb_query(conn, query_cstr.as_ptr(), format_cstr.as_ptr())
-        };
+        let result_ptr =
+            unsafe { bindings::chdb_query(conn, query_cstr.as_ptr(), format_cstr.as_ptr()) };
 
         if result_ptr.is_null() {
             return Err(Error::NoResult);

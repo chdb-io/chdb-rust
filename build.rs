@@ -13,14 +13,16 @@ fn main() {
             generate_bindings(&header_path, &out_path);
         }
         Err(e) => {
-            eprintln!("Failed to find or download libchdb: {}", e);
+            eprintln!("Failed to find or download libchdb: {e}");
             println!("cargo:warning=Failed to find libchdb. Please install manually using './update_libchdb.sh --local' or '--global'");
             std::process::exit(1);
         }
     }
 }
 
-fn find_libchdb_or_download(out_dir: &Path) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+fn find_libchdb_or_download(
+    out_dir: &Path,
+) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
     if let Some((lib_dir, header_path)) = find_existing_libchdb() {
         return Ok((lib_dir, header_path));
     }
@@ -46,11 +48,14 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
     let system_lib_path = Path::new("/usr/local/lib");
     let system_header_path = Path::new("/usr/local/include/chdb.h");
 
-    if system_header_path.exists() {
-        if system_lib_path.join("libchdb.so").exists() || 
-           system_lib_path.join("libchdb.dylib").exists() {
-            return Some((system_lib_path.to_path_buf(), system_header_path.to_path_buf()));
-        }
+    if system_header_path.exists()
+        && (system_lib_path.join("libchdb.so").exists()
+            || system_lib_path.join("libchdb.dylib").exists())
+    {
+        return Some((
+            system_lib_path.to_path_buf(),
+            system_header_path.to_path_buf(),
+        ));
     }
 
     None
@@ -59,11 +64,8 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
     let version = "v3.7.2";
-    let url = format!(
-        "https://github.com/chdb-io/chdb/releases/download/{}/{}",
-        version, platform
-    );
-    println!("cargo:warning=Downloading libchdb from: {}", url);
+    let url = format!("https://github.com/chdb-io/chdb/releases/download/{version}/{platform}");
+    println!("cargo:warning=Downloading libchdb from: {url}");
     let response = reqwest::blocking::get(&url)?;
     let content = response.bytes()?;
     let temp_archive = out_dir.join("libchdb.tar.gz");
@@ -76,7 +78,7 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
         let lib_path = out_dir.join("libchdb.so");
         if lib_path.exists() {
             let _ = Command::new("chmod")
-                .args(&["+x", lib_path.to_str().unwrap()])
+                .args(["+x", lib_path.to_str().unwrap()])
                 .output();
         }
     }
