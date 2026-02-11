@@ -1,6 +1,6 @@
 [package]
 name = "chdb-rust"
-version = "1.2.1"
+version = "1.3.0"
 edition = "2021"
 authors = ["Auxten"]
 description = "chDB FFI bindings for Rust(Experimental)"
@@ -21,3 +21,8 @@ tar = "0.4"
 
 [dev-dependencies]
 tempdir = "0.3.7"
+
+[package.metadata.docs.rs]
+# docs.rs cannot download libchdb or link native libraries.
+# Setting DOCS_RS env var tells build.rs to skip native build steps.
+rustc-args = ["--cfg", "docsrs"]

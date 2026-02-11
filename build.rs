@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    if env::var("DOCS_RS").is_ok() {
+        return;
+    }
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let out_path = PathBuf::from(&out_dir);
     let libchdb_info = find_libchdb_or_download(&out_path);
@@ -63,7 +67,7 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    let version = "v3.7.2";
+    let version = "v4.0.1";
     let url = format!("https://github.com/chdb-io/chdb/releases/download/{version}/{platform}");
     println!("cargo:warning=Downloading libchdb from: {url}");
     let response = reqwest::blocking::get(&url)?;
