@@ -4,6 +4,7 @@
 
 use std::ffi::{c_char, CString};
 
+use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::bindings;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
@@ -190,6 +191,188 @@ impl Connection {
 
         let result = QueryResult::new(result_ptr);
         result.check_error()
+    }
+
+    /// Register an Arrow stream as a table function with the given name.
+    ///
+    /// This function registers an Arrow stream as a virtual table that can be queried
+    /// using SQL. The table will be available for queries until it is unregistered.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name to register for the Arrow stream table function
+    /// * `arrow_stream` - The Arrow stream handle to register
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an [`Error`] if registration fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::arrow_stream::ArrowStream;
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    ///
+    /// // Assuming you have an Arrow stream handle
+    /// // let arrow_stream = ArrowStream::from_raw(stream_ptr);
+    /// // conn.register_arrow_stream("my_data", &arrow_stream)?;
+    ///
+    /// // Now you can query it
+    /// // let result = conn.query("SELECT * FROM my_data", OutputFormat::JSONEachRow)?;
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The table name contains invalid characters
+    /// - The Arrow stream handle is invalid
+    /// - Registration fails for any other reason
+    pub fn register_arrow_stream(
+        &self,
+        table_name: &str,
+        arrow_stream: &ArrowStream,
+    ) -> Result<()> {
+        let table_name_cstr = CString::new(table_name)?;
+        let conn = unsafe { *self.inner };
+
+        let state = unsafe {
+            bindings::chdb_arrow_scan(conn, table_name_cstr.as_ptr(), arrow_stream.as_raw())
+        };
+
+        if state == bindings::chdb_state_CHDBSuccess {
+            Ok(())
+        } else {
+            Err(Error::QueryError(format!(
+                "Failed to register Arrow stream as table '{}'",
+                table_name
+            )))
+        }
+    }
+
+    /// Register an Arrow array as a table function with the given name.
+    ///
+    /// This function registers an Arrow array (with its schema) as a virtual table
+    /// that can be queried using SQL. The table will be available for queries until
+    /// it is unregistered.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name to register for the Arrow array table function
+    /// * `arrow_schema` - The Arrow schema handle describing the array structure
+    /// * `arrow_array` - The Arrow array handle containing the data
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an [`Error`] if registration fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::arrow_stream::{ArrowSchema, ArrowArray};
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    ///
+    /// // Assuming you have Arrow schema and array handles
+    /// // let arrow_schema = ArrowSchema::from_raw(schema_ptr);
+    /// // let arrow_array = ArrowArray::from_raw(array_ptr);
+    /// // conn.register_arrow_array("my_data", &arrow_schema, &arrow_array)?;
+    ///
+    /// // Now you can query it
+    /// // let result = conn.query("SELECT * FROM my_data", OutputFormat::JSONEachRow)?;
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The table name contains invalid characters
+    /// - The Arrow schema or array handles are invalid
+    /// - Registration fails for any other reason
+    pub fn register_arrow_array(
+        &self,
+        table_name: &str,
+        arrow_schema: &ArrowSchema,
+        arrow_array: &ArrowArray,
+    ) -> Result<()> {
+        let table_name_cstr = CString::new(table_name)?;
+        let conn = unsafe { *self.inner };
+
+        let state = unsafe {
+            bindings::chdb_arrow_array_scan(
+                conn,
+                table_name_cstr.as_ptr(),
+                arrow_schema.as_raw(),
+                arrow_array.as_raw(),
+            )
+        };
+
+        if state == bindings::chdb_state_CHDBSuccess {
+            Ok(())
+        } else {
+            Err(Error::QueryError(format!(
+                "Failed to register Arrow array as table '{}'",
+                table_name
+            )))
+        }
+    }
+
+    /// Unregister an Arrow stream table function that was previously registered.
+    ///
+    /// This function removes a previously registered Arrow stream table function,
+    /// making it no longer available for queries.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name of the Arrow stream table function to unregister
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an [`Error`] if unregistration fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::arrow_stream::ArrowStream;
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    ///
+    /// // Register a table
+    /// // let arrow_stream = ArrowStream::from_raw(stream_ptr);
+    /// // conn.register_arrow_stream("my_data", &arrow_stream)?;
+    ///
+    /// // Use it...
+    ///
+    /// // Unregister when done
+    /// // conn.unregister_arrow_table("my_data")?;
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The table name contains invalid characters
+    /// - The table was not previously registered
+    /// - Unregistration fails for any other reason
+    pub fn unregister_arrow_table(&self, table_name: &str) -> Result<()> {
+        let table_name_cstr = CString::new(table_name)?;
+        let conn = unsafe { *self.inner };
+
+        let state =
+            unsafe { bindings::chdb_arrow_unregister_table(conn, table_name_cstr.as_ptr()) };
+
+        if state == bindings::chdb_state_CHDBSuccess {
+            Ok(())
+        } else {
+            Err(Error::QueryError(format!(
+                "Failed to unregister Arrow table '{}'",
+                table_name
+            )))
+        }
     }
 }
 
