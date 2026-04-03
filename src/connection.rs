@@ -5,10 +5,10 @@
 use std::ffi::{c_char, CString};
 
 use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
-use crate::bindings;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::{bindings, CHDB_PROGRAM_NAME};
 
 /// A connection to a chDB database.
 ///
@@ -49,13 +49,12 @@ unsafe impl Send for Connection {}
 impl Connection {
     /// Connect to chDB with the given command-line arguments.
     ///
-    /// This is a low-level function that allows you to pass arbitrary arguments
-    /// to the chDB connection. For most use cases, prefer [`open_in_memory`](Self::open_in_memory)
-    /// or [`open_with_path`](Self::open_with_path).
+    /// Use [crate::session::SessionBuilder] for a higher-level API that supports
+    /// sessions and persistent storage.
     ///
     /// # Arguments
     ///
-    /// * `args` - Array of command-line arguments (e.g., `["clickhouse", "--path=/tmp/db"]`)
+    /// * `args` - Array of command-line arguments (e.g., `["--path=/tmp/db"]`)
     ///
     /// # Examples
     ///
@@ -63,7 +62,7 @@ impl Connection {
     /// use chdb_rust::connection::Connection;
     ///
     /// // Connect with custom arguments
-    /// let conn = Connection::open(&["clickhouse", "--path=/tmp/mydb"])?;
+    /// let conn = Connection::open(&["--path=/tmp/mydb"])?;
     /// # Ok::<(), chdb_rust::error::Error>(())
     /// ```
     ///
@@ -72,14 +71,14 @@ impl Connection {
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
     pub fn open(args: &[&str]) -> Result<Self> {
-        let c_args: Vec<CString> = args
-            .iter()
-            .map(|s| CString::new(*s))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let c_args: Vec<CString> = std::iter::once(CHDB_PROGRAM_NAME)
+            .chain(args.iter().copied())
+            .map(CString::new)
+            .collect::<std::result::Result<_, _>>()?;
 
-        let mut argv: Vec<*mut c_char> = c_args.iter().map(|s| s.as_ptr() as *mut c_char).collect();
-
-        let conn_ptr = unsafe { bindings::chdb_connect(argv.len() as i32, argv.as_mut_ptr()) };
+        let argv: Vec<*const c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
+        let conn_ptr =
+            unsafe { bindings::chdb_connect(argv.len() as i32, argv.as_ptr() as *mut *mut c_char) };
 
         if conn_ptr.is_null() {
             return Err(Error::ConnectionFailed);
@@ -113,7 +112,7 @@ impl Connection {
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
     pub fn open_in_memory() -> Result<Self> {
-        Self::open(&["clickhouse"])
+        Self::open(&[])
     }
 
     /// Connect to a database at the given path.
@@ -138,9 +137,10 @@ impl Connection {
     ///
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
+    #[deprecated(note = "Use `SessionBuilder` instead")]
     pub fn open_with_path(path: &str) -> Result<Self> {
         let path_arg = format!("--path={path}");
-        Self::open(&["clickhouse", &path_arg])
+        Self::open(&[&path_arg])
     }
 
     /// Execute a query and return the result.
@@ -381,5 +381,28 @@ impl Drop for Connection {
         if !self.inner.is_null() {
             unsafe { bindings::chdb_close_conn(self.inner) };
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{error::Result, test_utils::tempdir};
+
+    #[test]
+    fn test_connection_open_with_explicit_data_path() -> Result<()> {
+        let tmp = tempdir();
+        let path_arg = format!(
+            "--path={}",
+            tmp.path().to_str().expect("temp path is not valid UTF-8")
+        );
+        Connection::open(&[&path_arg])?;
+
+        assert!(
+            tmp.path().read_dir()?.next().is_some(),
+            "expected chDB to create files in the data dir"
+        );
+
+        Ok(())
     }
 }

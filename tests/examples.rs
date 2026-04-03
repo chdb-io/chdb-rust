@@ -4,6 +4,7 @@
 //! in the chDB library. Run with `RUST_TEST_THREADS=1 cargo test --test examples`
 //! to ensure reliable execution.
 
+mod common;
 use chdb_rust::arg::Arg;
 use chdb_rust::error::Result;
 use chdb_rust::execute;
@@ -18,7 +19,7 @@ fn test_stateful() -> Result<()> {
     //
     // Create session.
     //
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let session = SessionBuilder::new()
         .with_data_path(tmp.path())
         .with_arg(Arg::LogLevel(LogLevel::Debug))
@@ -181,7 +182,7 @@ fn test_query_result_data_methods() -> Result<()> {
 
 #[test]
 fn test_multiple_inserts_and_aggregation() -> Result<()> {
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let session = SessionBuilder::new()
         .with_data_path(tmp.path())
         .with_auto_cleanup(true)
@@ -233,7 +234,7 @@ fn test_multiple_inserts_and_aggregation() -> Result<()> {
 
 #[test]
 fn test_different_data_types() -> Result<()> {
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let session = SessionBuilder::new()
         .with_data_path(tmp.path())
         .with_auto_cleanup(true)
@@ -307,7 +308,7 @@ fn test_error_handling_invalid_syntax() {
 
 #[test]
 fn test_session_auto_cleanup() -> Result<()> {
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let data_path = tmp.path().to_path_buf();
 
     {
@@ -342,7 +343,7 @@ fn test_session_auto_cleanup() -> Result<()> {
 
 #[test]
 fn test_complex_query_with_joins() -> Result<()> {
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let session = SessionBuilder::new()
         .with_data_path(tmp.path())
         .with_auto_cleanup(true)
@@ -427,7 +428,7 @@ fn test_default_output_format() -> Result<()> {
 
 #[test]
 fn test_session_without_auto_cleanup() -> Result<()> {
-    let tmp = tempdir::TempDir::new("chdb-rust")?;
+    let tmp = common::tempdir();
     let session = SessionBuilder::new()
         .with_data_path(tmp.path())
         .with_auto_cleanup(false) // Explicitly disable cleanup
