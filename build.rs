@@ -115,7 +115,9 @@ fn setup_link_paths(lib_dir: &Path) {
 fn generate_bindings(header_path: &Path, out_dir: &Path) {
     let wrapper_content = format!("#include \"{}\"", header_path.display());
     let temp_wrapper = out_dir.join("temp_wrapper.h");
-    fs::write(&temp_wrapper, wrapper_content).expect("Failed to write temp wrapper");
+    if fs::read_to_string(&temp_wrapper).map(|s| s != wrapper_content).unwrap_or(true) {
+        fs::write(&temp_wrapper, wrapper_content).expect("Failed to write temp wrapper");
+    }
     let bindings = bindgen::Builder::default()
         .header(temp_wrapper.to_str().unwrap())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
