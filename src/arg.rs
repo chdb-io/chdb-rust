@@ -4,9 +4,8 @@
 //! log level, and custom command-line arguments.
 
 use std::borrow::Cow;
-use std::ffi::CString;
+use std::fmt::Display;
 
-use crate::error::Error;
 use crate::format::OutputFormat;
 use crate::log_level::LogLevel;
 
@@ -35,12 +34,31 @@ use crate::log_level::LogLevel;
 #[derive(Debug)]
 pub enum Arg<'a> {
     /// `--config-file=<value>`
+    ///
+    /// Can be used to specify a custom configuration
+    /// file for the session, allowing one to configure various aspects of the
+    /// session's behavior (e.g., SSL settings to use with the `remoteSecure`
+    /// function).
+    ///
+    /// An example SSL configuration file (`chdb_ssl.xml`) might look like this:
+    /// ```xml
+    /// <clickhouse>
+    ///   <openSSL>
+    ///     <client>
+    ///       <caConfig>path_to_server_ca_cert.pem</caConfig>
+    ///     </client>
+    ///   </openSSL>
+    /// </clickhouse>
+    /// ```
+    /// where `path_to_server_ca_cert.pem` is the path to the CA certificate
+    /// of the remote server.
     ConfigFilePath(Cow<'a, str>),
     /// `--log-level=<value>`
     LogLevel(LogLevel),
     /// `--output-format=<value>`
     OutputFormat(OutputFormat),
     /// --multiquery
+    /// Emitted as `-n` (short for `--multiquery`).
     MultiQuery,
     /// Custom argument.
     ///
@@ -52,26 +70,12 @@ pub enum Arg<'a> {
     /// 1. Arg::Custom("multiline".to_string().into(), None).
     /// 2. Arg::Custom("multiline".into(), None).
     ///
-    /// We should tell user where to look for officially supported arguments.
-    /// Here is some hint for now: <https://github.com/fixcik/chdb-rs/blob/master/OPTIONS.md>.
+    /// Officially supported arguments can be found by running
+    /// `clickhouse-client --help` in the terminal.
     Custom(Cow<'a, str>, Option<Cow<'a, str>>),
 }
 
 impl<'a> Arg<'a> {
-    #[allow(dead_code)]
-    pub(crate) fn to_cstring(&self) -> Result<CString, Error> {
-        Ok(match self {
-            Self::ConfigFilePath(v) => CString::new(format!("--config-file={v}")),
-            Self::LogLevel(v) => CString::new(format!("--log-level={}", v.as_str())),
-            Self::OutputFormat(v) => CString::new(format!("--output-format={}", v.as_str())),
-            Self::MultiQuery => CString::new("-n"),
-            Self::Custom(k, v) => match v {
-                None => CString::new(k.as_ref()),
-                Some(v) => CString::new(format!("--{k}={v}")),
-            },
-        }?)
-    }
-
     /// Extract `OutputFormat` from an `Arg` if it is an `OutputFormat` variant.
     ///
     /// This is a helper method used internally to extract output format information
@@ -80,6 +84,21 @@ impl<'a> Arg<'a> {
         match self {
             Self::OutputFormat(f) => Some(*f),
             _ => None,
+        }
+    }
+}
+
+impl Display for Arg<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConfigFilePath(v) => write!(f, "--config-file={v}"),
+            Self::LogLevel(v) => write!(f, "--log-level={}", v.as_str()),
+            Self::OutputFormat(v) => write!(f, "--output-format={}", v.as_str()),
+            Self::MultiQuery => write!(f, "-n"),
+            Self::Custom(k, v) => match v {
+                None => write!(f, "--{}", k.as_ref()),
+                Some(v) => write!(f, "--{k}={v}"),
+            },
         }
     }
 }
@@ -96,7 +115,73 @@ impl<'a> Arg<'a> {
 /// # Returns
 ///
 /// Returns the first `OutputFormat` found, or `OutputFormat::TabSeparated` as default.
-pub(crate) fn extract_output_format(args: Option<&[Arg]>) -> OutputFormat {
+pub(crate) fn extract_output_format(args: Option<&[Arg]>, default: OutputFormat) -> OutputFormat {
     args.and_then(|args| args.iter().find_map(|a| a.as_output_format()))
-        .unwrap_or(OutputFormat::TabSeparated)
+        .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_arg_display_config_file_path() {
+        assert_eq!(
+            Arg::ConfigFilePath(Cow::from("my.xml")).to_string(),
+            "--config-file=my.xml"
+        );
+    }
+
+    #[test]
+    fn test_arg_display_log_level() {
+        assert_eq!(
+            Arg::LogLevel(LogLevel::Trace).to_string(),
+            "--log-level=trace"
+        );
+        assert_eq!(
+            Arg::LogLevel(LogLevel::Debug).to_string(),
+            "--log-level=debug"
+        );
+        assert_eq!(
+            Arg::LogLevel(LogLevel::Info).to_string(),
+            "--log-level=information"
+        );
+        assert_eq!(
+            Arg::LogLevel(LogLevel::Warn).to_string(),
+            "--log-level=warning"
+        );
+        assert_eq!(
+            Arg::LogLevel(LogLevel::Error).to_string(),
+            "--log-level=error"
+        );
+    }
+
+    #[test]
+    fn test_arg_display_output_format() {
+        assert_eq!(
+            Arg::OutputFormat(OutputFormat::JSONEachRow).to_string(),
+            "--output-format=JSONEachRow"
+        );
+    }
+
+    #[test]
+    fn test_arg_display_multi_query() {
+        assert_eq!(Arg::MultiQuery.to_string(), "-n");
+    }
+
+    #[test]
+    fn test_arg_display_custom_key_only() {
+        assert_eq!(
+            Arg::Custom("multiline".into(), None).to_string(),
+            "--multiline"
+        );
+    }
+
+    #[test]
+    fn test_arg_display_custom_key_value() {
+        assert_eq!(
+            Arg::Custom("priority".into(), Some("1".into())).to_string(),
+            "--priority=1"
+        );
+    }
 }
