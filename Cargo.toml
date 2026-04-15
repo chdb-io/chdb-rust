@@ -13,6 +13,11 @@ keywords = ["clickhouse", "chdb", "database", "embedded", "analytics"]
 [dependencies]
 thiserror = "1"
 
+[features]
+# By default, we link dynamically.
+# Users can opt-in to static linking with --features static
+static = []
+
 [build-dependencies]
 bindgen = "0.70.1"
 reqwest = { version = "0.11", features = ["blocking"] }
