@@ -70,23 +70,43 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
     let version = "v26.1.0";
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
+
     println!("cargo:warning=Downloading libchdb from: {url}");
-    let response = reqwest::blocking::get(&url)?;
-    let content = response.bytes()?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()?;
+
+    let mut response = client.get(&url).send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("Download failed with status: {}", response.status()).into());
+    }
+
     let temp_archive = out_dir.join("libchdb.tar.gz");
-    fs::write(&temp_archive, content)?;
+    let mut dest = fs::File::create(&temp_archive)?;
+    response.copy_to(&mut dest)?;
+
+    println!("cargo:warning=Unpacking libchdb...");
     let file = fs::File::open(&temp_archive)?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
     archive.unpack(out_dir)?;
     fs::remove_file(&temp_archive)?;
+
     if cfg!(unix) {
-        let lib_path = out_dir.join("libchdb.so");
+        let lib_path = if std::env::var("CARGO_FEATURE_STATIC").is_ok() {
+            out_dir.join("libchdb.a")
+        } else {
+            out_dir.join("libchdb.so")
+        };
+
         if lib_path.exists() {
             let _ = Command::new("chmod")
                 .args(["+x", lib_path.to_str().unwrap()])
                 .output();
         }
     }
+
     println!("cargo:warning=libchdb downloaded successfully to OUT_DIR");
     Ok(())
 }
@@ -94,20 +114,38 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
 fn get_platform_string() -> Result<String, &'static str> {
     let os = env::consts::OS;
     let arch = env::consts::ARCH;
+
+    // Check if the static feature is enabled to decide which filename to download
+    let is_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
+    let ext = if is_static {
+        "-static.tar.gz"
+    } else {
+        ".tar.gz"
+    };
+
     match (os, arch) {
-        ("linux", "x86_64") => Ok("linux-x86_64-libchdb.tar.gz".to_string()),
-        ("linux", "aarch64") => Ok("linux-aarch64-libchdb.tar.gz".to_string()),
-        ("macos", "x86_64") => Ok("macos-x86_64-libchdb.tar.gz".to_string()),
-        ("macos", "aarch64") => Ok("macos-arm64-libchdb.tar.gz".to_string()),
+        ("linux", "x86_64") => Ok(format!("linux-x86_64-libchdb{}", ext)),
+        ("linux", "aarch64") => Ok(format!("linux-aarch64-libchdb{}", ext)),
+        ("macos", "x86_64") => Ok(format!("macos-x86_64-libchdb{}", ext)),
+        ("macos", "aarch64") => Ok(format!("macos-arm64-libchdb{}", ext)),
         _ => Err("Unsupported platform"),
     }
 }
 
 fn setup_link_paths(lib_dir: &Path) {
-    println!("cargo:rustc-link-search={}", lib_dir.display());
-    println!("cargo:rustc-link-search=./");
-    println!("cargo:rustc-link-search=/usr/local/lib");
-    println!("cargo:rustc-link-lib=chdb");
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!("cargo:rustc-link-search=native=./");
+    println!("cargo:rustc-link-search=native=/usr/local/lib");
+
+    let is_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
+
+    if is_static {
+        println!("cargo:rustc-link-lib=static=chdb");
+        println!("cargo:rustc-link-lib=stdc++");
+    } else {
+        println!("cargo:rustc-link-lib=chdb");
+    }
+
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=build.rs");
 }
