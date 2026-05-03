@@ -53,10 +53,16 @@ pub mod log_level;
 pub mod query_result;
 pub mod session;
 
+#[cfg(test)]
+mod test_utils;
+
 use crate::arg::{extract_output_format, Arg};
 use crate::connection::Connection;
 use crate::error::Result;
+use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+
+pub(crate) const CHDB_PROGRAM_NAME: &str = "clickhouse";
 
 /// Execute a one-off query using an in-memory connection.
 ///
@@ -101,6 +107,6 @@ use crate::query_result::QueryResult;
 /// - The query execution fails
 pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
     let conn = Connection::open_in_memory()?;
-    let fmt = extract_output_format(query_args);
+    let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
     conn.query(query, fmt)
 }
