@@ -111,10 +111,13 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn get_platform_string() -> Result<String, &'static str> {
-    let os = env::consts::OS;
-    let arch = env::consts::ARCH;
+fn target_platform() -> (String, String) {
+    let os = env::var("CARGO_CFG_TARGET_OS").expect("Failed to get target OS");
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Failed to get target architecture");
+    (os, arch)
+}
 
+fn get_platform_string() -> Result<String, &'static str> {
     // Check if the static feature is enabled to decide which filename to download
     let is_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
     let ext = if is_static {
@@ -123,7 +126,8 @@ fn get_platform_string() -> Result<String, &'static str> {
         ".tar.gz"
     };
 
-    match (os, arch) {
+    let (os, arch) = target_platform();
+    match (os.as_str(), arch.as_str()) {
         ("linux", "x86_64") => Ok(format!("linux-x86_64-libchdb{}", ext)),
         ("linux", "aarch64") => Ok(format!("linux-aarch64-libchdb{}", ext)),
         ("macos", "x86_64") => Ok(format!("macos-x86_64-libchdb{}", ext)),
@@ -141,7 +145,19 @@ fn setup_link_paths(lib_dir: &Path) {
 
     if is_static {
         println!("cargo:rustc-link-lib=static=chdb");
-        println!("cargo:rustc-link-lib=stdc++");
+        match target_platform().0.as_str() {
+            "linux" => {
+                println!("cargo:rustc-link-lib=stdc++");
+            }
+            "macos" => {
+                // https://github.com/chdb-io/chdb-core/blob/10e35571d0fa9c863d590cc9e1f00ca927ae908d/chdb/build/build_static_lib.sh#L104-L107
+                println!("cargo:rustc-link-lib=c++");
+                println!("cargo:rustc-link-lib=iconv");
+                println!("cargo:rustc-link-lib=framework=CoreFoundation");
+                println!("cargo:rustc-link-lib=framework=Security");
+            }
+            _ => {}
+        }
     } else {
         println!("cargo:rustc-link-lib=chdb");
     }
