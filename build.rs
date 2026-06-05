@@ -67,7 +67,7 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    let version = "v26.1.0";
+    let version = "v26.3.0";
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
 
@@ -180,10 +180,6 @@ fn generate_bindings(header_path: &Path, out_dir: &Path) {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .expect("Unable to generate bindings");
-    let src_path = PathBuf::from("./src/");
-    bindings
-        .write_to_file(src_path.join("bindings.rs"))
-        .expect("Couldn't write bindings to src!");
     bindings
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings to OUT_DIR!");
