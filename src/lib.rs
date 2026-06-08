@@ -45,7 +45,9 @@ pub mod arrow_stream;
     non_camel_case_types,
     non_upper_case_globals
 )]
-mod bindings;
+mod bindings {
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
 pub mod connection;
 pub mod error;
 pub mod format;
