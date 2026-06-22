@@ -11,6 +11,7 @@ use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::query_stream::QueryStream;
 use crate::{bindings, CHDB_PROGRAM_NAME};
 
 /// A connection to a chDB database.
@@ -146,6 +147,18 @@ impl Connection {
         Self::open(&[&path_arg])
     }
 
+    /// Get the underlying chDB connection handle.
+    ///
+    /// Returns the `chdb_connection` value passed to chDB C API functions. This is
+    /// used by crate-internal code such as [`QueryStream`](crate::query_stream::QueryStream).
+    ///
+    /// # Returns
+    ///
+    /// Returns the raw `chdb_connection` handle.
+    pub(crate) fn handle(&self) -> bindings::chdb_connection {
+        unsafe { *self.inner }
+    }
+
     /// Execute a query and return the result.
     ///
     /// Executes a SQL query against the database and returns the result in the
@@ -196,8 +209,52 @@ impl Connection {
         result.check_error()
     }
 
-    /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
+    /// Execute a query and return a streaming result.
+    ///
+    /// Unlike [`query`](Self::query), this returns a [`QueryStream`] that yields
+    /// result data in chunks. This is useful for large result sets that should not
+    /// be fully materialized in memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL query string to execute
+    /// * `format` - The desired output format for each chunk
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`QueryStream`] tied to this connection, or an [`Error`] if the query
+    /// cannot be started.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::format::OutputFormat;
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    /// let mut stream = conn.query_stream(
+    ///     "SELECT number FROM numbers(100_000)",
+    ///     OutputFormat::JSONEachRow,
+    /// )?;
+    ///
+    /// while let Some(chunk) = stream.next_chunk()? {
+    ///     print!("{}", chunk.data_utf8_lossy());
+    /// }
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The query syntax is invalid
+    /// - The query references non-existent tables or columns
+    /// - The query execution fails for any other reason
+    pub fn query_stream<'a>(&'a self, sql: &str, format: OutputFormat) -> Result<QueryStream<'a>> {
+        QueryStream::start_borrowed(self, sql, format)
+    }
+
     #[cfg(feature = "arrow")]
+    /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
     ///
     /// Pass a raw `ArrowArrayStream*` (see [`ArrowStream`](crate::arrow_stream::ArrowStream)).
     /// Registered names are **not** ordinary tables; query them with the
@@ -251,8 +308,8 @@ impl Connection {
         }
     }
 
-    /// Register Arrow C Data Interface schema + array for use with `ArrowStream('name')`.
     #[cfg(feature = "arrow")]
+    /// Register Arrow C Data Interface schema + array for use with `ArrowStream('name')`.
     ///
     /// libchdb wraps the pair in a one-shot stream. Query via
     /// [`arrow_stream_table_sql`](crate::arrow_stream::arrow_stream_table_sql).
@@ -321,8 +378,8 @@ impl Connection {
         }
     }
 
-    /// Unregister an Arrow stream table function that was previously registered.
     #[cfg(feature = "arrow")]
+    /// Unregister an Arrow stream table function that was previously registered.
     ///
     /// This function removes a previously registered Arrow stream table function,
     /// making it no longer available for queries.

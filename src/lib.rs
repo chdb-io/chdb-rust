@@ -25,6 +25,7 @@
 //! - **Stateless queries**: Execute one-off queries without persistent storage
 //! - **Stateful sessions**: Create databases and tables with persistent storage
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
+//! - **Query result streaming**: Read large result sets in chunks with constant memory
 //! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //!
@@ -70,6 +71,7 @@ pub mod error;
 pub mod format;
 pub mod log_level;
 pub mod query_result;
+pub mod query_stream;
 pub mod session;
 
 #[cfg(test)]
@@ -80,6 +82,7 @@ use crate::connection::Connection;
 use crate::error::Result;
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::query_stream::QueryStream;
 
 pub(crate) const CHDB_PROGRAM_NAME: &str = "clickhouse";
 
@@ -128,4 +131,52 @@ pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
     let conn = Connection::open_in_memory()?;
     let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
     conn.query(query, fmt)
+}
+
+/// Execute a one-off streaming query using an in-memory connection.
+///
+/// This function creates a temporary in-memory database connection, starts a
+/// streaming query, and returns a [`QueryStream`] that owns the connection.
+/// The connection is kept alive until the stream is dropped.
+///
+/// Primarily useful for reading external data: CSV files, S3, Parquet, etc.
+///
+/// # Arguments
+///
+/// * `query` - The SQL query string to execute
+/// * `query_args` - Optional array of query arguments (e.g., output format)
+///
+/// # Returns
+///
+/// Returns a [`QueryStream`] that owns the temporary connection, or an
+/// [`Error`](error::Error) if the query cannot be started.
+///
+/// # Examples
+///
+/// ```no_run
+/// use chdb_rust::execute_stream;
+/// use chdb_rust::arg::Arg;
+/// use chdb_rust::format::OutputFormat;
+///
+/// let mut stream = execute_stream(
+///     "SELECT number FROM numbers(100_000)",
+///     Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
+/// )?;
+///
+/// while let Some(chunk) = stream.next_chunk()? {
+///     print!("{}", chunk.data_utf8_lossy());
+/// }
+/// # Ok::<(), chdb_rust::error::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The query syntax is invalid
+/// - The connection cannot be established
+/// - The query execution fails
+pub fn execute_stream(query: &str, query_args: Option<&[Arg]>) -> Result<QueryStream<'static>> {
+    let conn = Connection::open_in_memory()?;
+    let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
+    QueryStream::start_owned(conn, query, fmt)
 }

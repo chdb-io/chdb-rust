@@ -23,6 +23,7 @@ use crate::connection::Connection;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::query_stream::QueryStream;
 
 /// Builder for creating [`Session`] instances.
 ///
@@ -343,6 +344,62 @@ impl Session {
     pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
         let fmt = extract_output_format(query_args, self.default_format);
         self.conn.query(query, fmt)
+    }
+
+    /// Execute a query and return a streaming result.
+    ///
+    /// Like [`execute`](Self::execute), but returns a [`QueryStream`] that yields
+    /// result data in chunks instead of materializing the full output at once.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The SQL query string to execute
+    /// * `query_args` - Optional array of query arguments (e.g., output format).
+    ///
+    /// Only `OutputFormat` is currently supported and will override the
+    /// session's default output format for this query.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`QueryStream`] tied to this session's connection, or an [`Error`]
+    /// if the query cannot be started.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::session::SessionBuilder;
+    /// use chdb_rust::arg::Arg;
+    /// use chdb_rust::format::OutputFormat;
+    ///
+    /// let session = SessionBuilder::new()
+    ///     .with_data_path("/tmp/mydb")
+    ///     .with_auto_cleanup(true)
+    ///     .build()?;
+    ///
+    /// let mut stream = session.execute_stream(
+    ///     "SELECT number FROM numbers(100_000)",
+    ///     Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
+    /// )?;
+    ///
+    /// while let Some(chunk) = stream.next_chunk()? {
+    ///     print!("{}", chunk.data_utf8_lossy());
+    /// }
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The query syntax is invalid
+    /// - The query references non-existent tables or columns
+    /// - The query execution fails for any other reason
+    pub fn execute_stream<'a>(
+        &'a self,
+        query: &str,
+        query_args: Option<&[Arg]>,
+    ) -> Result<QueryStream<'a>> {
+        let fmt = extract_output_format(query_args, self.default_format);
+        self.conn.query_stream(query, fmt)
     }
 
     /// Access the session's [`Connection`] for Arrow registration and low-level queries.
