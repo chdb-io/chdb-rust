@@ -461,6 +461,20 @@ impl Session {
     ) -> Result<()> {
         insert_record_batch_reader(self.connection(), dest_table, stream_name, reader, options)
     }
+
+    /// Execute a query and stream the result as Arrow record batches.
+    ///
+    /// Session-level counterpart of
+    /// [`Connection::query_stream_arrow`](crate::connection::Connection::query_stream_arrow).
+    ///
+    /// Available when the crate is built with the `arrow` feature.
+    #[cfg(feature = "arrow")]
+    pub fn execute_stream_arrow<'a>(
+        &'a self,
+        query: &str,
+    ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'a>> {
+        self.conn.query_stream_arrow(query)
+    }
 }
 
 impl Drop for Session {

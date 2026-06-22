@@ -253,6 +253,34 @@ impl Connection {
         QueryStream::start_borrowed(self, sql, format)
     }
 
+    /// Execute a query and stream the result as Arrow record batches.
+    ///
+    /// Each call to [`Iterator::next`] or [`ArrowQueryStream::next_batch`] on the
+    /// returned stream pulls a single [`arrow::record_batch::RecordBatch`] via the
+    /// Arrow C Data Interface.
+    ///
+    /// Available when the crate is built with the `arrow` feature.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    /// let mut stream = conn.query_stream_arrow("SELECT number FROM numbers(100_000)")?;
+    /// while let Some(batch) = stream.next_batch()? {
+    ///     println!("rows: {}", batch.num_rows());
+    /// }
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    #[cfg(feature = "arrow")]
+    pub fn query_stream_arrow<'a>(
+        &'a self,
+        sql: &str,
+    ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'a>> {
+        crate::arrow_query_stream::ArrowQueryStream::start_borrowed(self, sql)
+    }
+
     #[cfg(feature = "arrow")]
     /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
     ///
