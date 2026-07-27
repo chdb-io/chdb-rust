@@ -79,6 +79,14 @@ cargo test -- --test-threads=1
 - **Detailed documentation**: See [docs/examples.md](docs/examples.md) for comprehensive examples and explanations
 - **Test examples**: See [tests/](tests/) directory for additional usage examples
 
+## Arrow Bulk Insert
+
+The crate includes Apache Arrow bulk insert support via the `arrow` dependency. See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:
+
+```bash
+cargo run --example 08_arrow_insert
+```
+
 ## Contributing
 
 We welcome contributions! Here's how you can help:

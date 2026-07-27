@@ -1,6 +1,6 @@
 [package]
 name = "chdb-rust"
-version = "1.3.1"
+version = "1.4.0"
 edition = "2021"
 authors = ["Auxten"]
 description = "chDB FFI bindings for Rust(Experimental)"
@@ -11,6 +11,7 @@ readme = "README.md"
 keywords = ["clickhouse", "chdb", "database", "embedded", "analytics"]
 
 [dependencies]
+arrow = { version = "54", features = ["ffi"] }
 thiserror = "1"
 
 [features]
@@ -25,7 +26,10 @@ flate2 = "1.0"
 tar = "0.4"
 
 [dev-dependencies]
+arrow = { version = "54", features = ["ffi"] }
+arrow-array = "54"
 tempdir = "0.3.7"
+tempfile = "3"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.

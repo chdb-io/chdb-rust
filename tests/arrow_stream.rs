@@ -11,8 +11,7 @@ use chdb_rust::error::Error;
 #[test]
 fn test_arrow_stream_wrapper() {
     // Test creating ArrowStream from null pointer
-    let null_ptr = std::ptr::null_mut();
-    let stream = unsafe { ArrowStream::from_raw(null_ptr) };
+    let stream = unsafe { ArrowStream::from_raw(std::ptr::null_mut()) };
     assert!(stream.as_raw().is_null());
 
     // Test that we can clone and copy
@@ -140,8 +139,7 @@ fn test_unregister_nonexistent_table() {
 fn test_arrow_stream_send() {
     // Test that ArrowStream implements Send
     use std::thread;
-    let null_ptr = std::ptr::null_mut();
-    let stream = unsafe { ArrowStream::from_raw(null_ptr) };
+    let stream = unsafe { ArrowStream::from_raw(std::ptr::null_mut()) };
 
     thread::spawn(move || {
         let _ = stream;

@@ -25,6 +25,7 @@
 //! - **Stateless queries**: Execute one-off queries without persistent storage
 //! - **Stateful sessions**: Create databases and tables with persistent storage
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
+//! - **Arrow bulk insert**: [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //!
 //! ## Examples
@@ -37,7 +38,15 @@
 //! All public functions are safe to call, and the crate ensures proper resource cleanup.
 
 pub mod arg;
+pub mod arrow_insert;
+pub mod arrow_options;
 pub mod arrow_stream;
+pub use arrow_insert::{
+    insert_record_batch, insert_record_batch_direct, insert_record_batch_reader,
+    insert_record_batches,
+};
+pub use arrow_options::InsertOptions;
+pub use arrow_stream::arrow_stream_table_sql;
 #[allow(
     dead_code,
     unused,

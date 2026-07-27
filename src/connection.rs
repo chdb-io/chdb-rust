@@ -4,6 +4,8 @@
 
 use std::ffi::{c_char, CString};
 
+#[cfg(direct_arrow_insert)]
+use crate::arrow_options::InsertOptions;
 use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
@@ -193,34 +195,29 @@ impl Connection {
         result.check_error()
     }
 
-    /// Register an Arrow stream as a table function with the given name.
+    /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
     ///
-    /// This function registers an Arrow stream as a virtual table that can be queried
-    /// using SQL. The table will be available for queries until it is unregistered.
+    /// Pass a raw `ArrowArrayStream*` (see [`ArrowStream`](crate::arrow_stream::ArrowStream)).
+    /// Registered names are **not** ordinary tables; query them with the
+    /// [`arrow_stream_table_sql`](crate::arrow_stream::arrow_stream_table_sql) helper, e.g.
+    /// `SELECT * FROM ArrowStream('my_data')`.
     ///
-    /// # Arguments
-    ///
-    /// * `table_name` - The name to register for the Arrow stream table function
-    /// * `arrow_stream` - The Arrow stream handle to register
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an [`Error`] if registration fails.
+    /// The stream pointer must stay valid until [`unregister_arrow_table`](Self::unregister_arrow_table)
+    /// is called or the connection is dropped.
     ///
     /// # Examples
     ///
     /// ```no_run
+    /// use chdb_rust::arrow_stream::{arrow_stream_table_sql, ArrowStream};
     /// use chdb_rust::connection::Connection;
-    /// use chdb_rust::arrow_stream::ArrowStream;
+    /// use chdb_rust::format::OutputFormat;
     ///
     /// let conn = Connection::open_in_memory()?;
-    ///
-    /// // Assuming you have an Arrow stream handle
-    /// // let arrow_stream = ArrowStream::from_raw(stream_ptr);
+    /// // let stream_ptr: *mut arrow::ffi::FFI_ArrowArrayStream = ...;
+    /// // let arrow_stream = unsafe { ArrowStream::from_raw(stream_ptr) };
     /// // conn.register_arrow_stream("my_data", &arrow_stream)?;
-    ///
-    /// // Now you can query it
-    /// // let result = conn.query("SELECT * FROM my_data", OutputFormat::JSONEachRow)?;
+    /// // let sql = format!("SELECT * FROM {}", arrow_stream_table_sql("my_data"));
+    /// // let _ = conn.query(&sql, OutputFormat::JSONEachRow)?;
     /// # Ok::<(), chdb_rust::error::Error>(())
     /// ```
     ///
@@ -252,15 +249,14 @@ impl Connection {
         }
     }
 
-    /// Register an Arrow array as a table function with the given name.
+    /// Register Arrow C Data Interface schema + array for use with `ArrowStream('name')`.
     ///
-    /// This function registers an Arrow array (with its schema) as a virtual table
-    /// that can be queried using SQL. The table will be available for queries until
-    /// it is unregistered.
+    /// libchdb wraps the pair in a one-shot stream. Query via
+    /// [`arrow_stream_table_sql`](crate::arrow_stream::arrow_stream_table_sql).
     ///
     /// # Arguments
     ///
-    /// * `table_name` - The name to register for the Arrow array table function
+    /// * `table_name` - The name to register for the Arrow stream table function
     /// * `arrow_schema` - The Arrow schema handle describing the array structure
     /// * `arrow_array` - The Arrow array handle containing the data
     ///
@@ -271,18 +267,20 @@ impl Connection {
     /// # Examples
     ///
     /// ```no_run
+    /// use chdb_rust::arrow_stream::{arrow_stream_table_sql, ArrowArray, ArrowSchema};
     /// use chdb_rust::connection::Connection;
-    /// use chdb_rust::arrow_stream::{ArrowSchema, ArrowArray};
+    /// use chdb_rust::format::OutputFormat;
     ///
     /// let conn = Connection::open_in_memory()?;
     ///
-    /// // Assuming you have Arrow schema and array handles
-    /// // let arrow_schema = ArrowSchema::from_raw(schema_ptr);
-    /// // let arrow_array = ArrowArray::from_raw(array_ptr);
+    /// // Assuming you have Arrow C Data Interface schema and array handles
+    /// // let arrow_schema = unsafe { ArrowSchema::from_raw(schema_ptr) };
+    /// // let arrow_array = unsafe { ArrowArray::from_raw(array_ptr) };
     /// // conn.register_arrow_array("my_data", &arrow_schema, &arrow_array)?;
     ///
-    /// // Now you can query it
-    /// // let result = conn.query("SELECT * FROM my_data", OutputFormat::JSONEachRow)?;
+    /// // Query via the ArrowStream table function
+    /// // let sql = format!("SELECT * FROM {}", arrow_stream_table_sql("my_data"));
+    /// // let result = conn.query(&sql, OutputFormat::JSONEachRow)?;
     /// # Ok::<(), chdb_rust::error::Error>(())
     /// ```
     ///
@@ -374,6 +372,87 @@ impl Connection {
             )))
         }
     }
+
+    /// Insert rows from a registered Arrow schema+array directly into `dest_table`.
+    ///
+    /// Requires libchdb built with `chdb_insert_arrow_array` (see `direct_arrow_insert` cfg).
+    #[cfg(direct_arrow_insert)]
+    pub fn insert_arrow_array(
+        &self,
+        dest_table: &str,
+        arrow_schema: &ArrowSchema,
+        arrow_array: &ArrowArray,
+        options: &InsertOptions,
+    ) -> Result<()> {
+        let dest_cstr = CString::new(dest_table)?;
+        let (options_ptr, _settings) = build_insert_options_c(options)?;
+
+        let conn = unsafe { *self.inner };
+        let result_ptr = unsafe {
+            bindings::chdb_insert_arrow_array(
+                conn,
+                dest_cstr.as_ptr(),
+                arrow_schema.as_raw(),
+                arrow_array.as_raw(),
+                options_ptr,
+            )
+        };
+
+        check_insert_result(result_ptr)
+    }
+
+    /// Insert rows from a registered Arrow stream directly into `dest_table`.
+    ///
+    /// Requires libchdb built with `chdb_insert_arrow_stream` (see `direct_arrow_insert` cfg).
+    #[cfg(direct_arrow_insert)]
+    pub fn insert_arrow_stream(
+        &self,
+        dest_table: &str,
+        arrow_stream: &ArrowStream,
+        options: &InsertOptions,
+    ) -> Result<()> {
+        let dest_cstr = CString::new(dest_table)?;
+        let (options_ptr, _settings) = build_insert_options_c(options)?;
+
+        let conn = unsafe { *self.inner };
+        let result_ptr = unsafe {
+            bindings::chdb_insert_arrow_stream(
+                conn,
+                dest_cstr.as_ptr(),
+                arrow_stream.as_raw(),
+                options_ptr,
+            )
+        };
+
+        check_insert_result(result_ptr)
+    }
+}
+
+#[cfg(direct_arrow_insert)]
+fn build_insert_options_c(
+    options: &InsertOptions,
+) -> Result<(*const bindings::chdb_arrow_insert_options, Option<CString>)> {
+    let settings_cstr = options.settings_clause().map(CString::new).transpose()?;
+    let c_options = settings_cstr
+        .as_ref()
+        .map(|settings| bindings::chdb_arrow_insert_options {
+            settings: settings.as_ptr(),
+        });
+    let options_ptr = c_options
+        .as_ref()
+        .map(|opts| opts as *const bindings::chdb_arrow_insert_options)
+        .unwrap_or(std::ptr::null());
+    Ok((options_ptr, settings_cstr))
+}
+
+#[cfg(direct_arrow_insert)]
+fn check_insert_result(result_ptr: *mut bindings::chdb_result) -> Result<()> {
+    if result_ptr.is_null() {
+        return Err(Error::NoResult);
+    }
+
+    let result = QueryResult::new(result_ptr);
+    result.check_error().map(|_| ())
 }
 
 impl Drop for Connection {
