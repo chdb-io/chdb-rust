@@ -34,9 +34,7 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         schema,
         vec![
             Arc::new(Int64Array::from(vec![1i64, 2, 3, 4, 5])),
-            Arc::new(Float64Array::from(vec![
-                10.0, 20.0, 30.0, 40.0, 50.0,
-            ])),
+            Arc::new(Float64Array::from(vec![10.0, 20.0, 30.0, 40.0, 50.0])),
         ],
     )
     .map_err(|e| chdb_rust::error::Error::QueryError(e.to_string()))?;
