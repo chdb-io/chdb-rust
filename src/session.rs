@@ -6,14 +6,18 @@
 use std::path::PathBuf;
 use std::{fs, io};
 
+#[cfg(feature = "arrow")]
 use arrow::array::{RecordBatch, RecordBatchReader};
+#[cfg(feature = "arrow")]
 use arrow::datatypes::SchemaRef;
 
 use crate::arg::{extract_output_format, Arg};
+#[cfg(feature = "arrow")]
 use crate::arrow_insert::{
     insert_record_batch, insert_record_batch_direct, insert_record_batch_reader,
     insert_record_batches,
 };
+#[cfg(feature = "arrow")]
 use crate::arrow_options::InsertOptions;
 use crate::connection::Connection;
 use crate::error::{Error, Result};
@@ -347,6 +351,7 @@ impl Session {
     }
 
     /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
+    #[cfg(feature = "arrow")]
     pub fn insert_record_batch(
         &self,
         dest_table: &str,
@@ -358,6 +363,7 @@ impl Session {
     }
 
     /// See [`insert_record_batch_direct`](crate::arrow_insert::insert_record_batch_direct).
+    #[cfg(feature = "arrow")]
     pub fn insert_record_batch_direct(
         &self,
         dest_table: &str,
@@ -368,6 +374,7 @@ impl Session {
     }
 
     /// See [`insert_record_batches`](crate::arrow_insert::insert_record_batches).
+    #[cfg(feature = "arrow")]
     pub fn insert_record_batches(
         &self,
         dest_table: &str,
@@ -387,6 +394,7 @@ impl Session {
     }
 
     /// See [`insert_record_batch_reader`](crate::arrow_insert::insert_record_batch_reader).
+    #[cfg(feature = "arrow")]
     pub fn insert_record_batch_reader(
         &self,
         dest_table: &str,

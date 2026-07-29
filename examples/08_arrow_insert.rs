@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use arrow::array::{Int64Array, RecordBatch};
-use arrow::datatypes::{DataType, Field, Schema};
+use chdb_rust::arrow::array::{Float64Array, Int64Array, RecordBatch};
+use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
 
 use chdb_rust::arg::Arg;
 use chdb_rust::format::OutputFormat;
@@ -34,7 +34,7 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         schema,
         vec![
             Arc::new(Int64Array::from(vec![1i64, 2, 3, 4, 5])),
-            Arc::new(arrow::array::Float64Array::from(vec![
+            Arc::new(Float64Array::from(vec![
                 10.0, 20.0, 30.0, 40.0, 50.0,
             ])),
         ],

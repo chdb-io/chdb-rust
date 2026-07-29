@@ -4,8 +4,9 @@
 
 use std::ffi::{c_char, CString};
 
-#[cfg(direct_arrow_insert)]
+#[cfg(all(feature = "arrow", direct_arrow_insert))]
 use crate::arrow_options::InsertOptions;
+#[cfg(feature = "arrow")]
 use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
@@ -196,6 +197,7 @@ impl Connection {
     }
 
     /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
+    #[cfg(feature = "arrow")]
     ///
     /// Pass a raw `ArrowArrayStream*` (see [`ArrowStream`](crate::arrow_stream::ArrowStream)).
     /// Registered names are **not** ordinary tables; query them with the
@@ -250,6 +252,7 @@ impl Connection {
     }
 
     /// Register Arrow C Data Interface schema + array for use with `ArrowStream('name')`.
+    #[cfg(feature = "arrow")]
     ///
     /// libchdb wraps the pair in a one-shot stream. Query via
     /// [`arrow_stream_table_sql`](crate::arrow_stream::arrow_stream_table_sql).
@@ -319,6 +322,7 @@ impl Connection {
     }
 
     /// Unregister an Arrow stream table function that was previously registered.
+    #[cfg(feature = "arrow")]
     ///
     /// This function removes a previously registered Arrow stream table function,
     /// making it no longer available for queries.
@@ -376,7 +380,7 @@ impl Connection {
     /// Insert rows from a registered Arrow schema+array directly into `dest_table`.
     ///
     /// Requires libchdb built with `chdb_insert_arrow_array` (see `direct_arrow_insert` cfg).
-    #[cfg(direct_arrow_insert)]
+    #[cfg(all(feature = "arrow", direct_arrow_insert))]
     pub fn insert_arrow_array(
         &self,
         dest_table: &str,
@@ -404,7 +408,7 @@ impl Connection {
     /// Insert rows from a registered Arrow stream directly into `dest_table`.
     ///
     /// Requires libchdb built with `chdb_insert_arrow_stream` (see `direct_arrow_insert` cfg).
-    #[cfg(direct_arrow_insert)]
+    #[cfg(all(feature = "arrow", direct_arrow_insert))]
     pub fn insert_arrow_stream(
         &self,
         dest_table: &str,
@@ -428,7 +432,7 @@ impl Connection {
     }
 }
 
-#[cfg(direct_arrow_insert)]
+#[cfg(all(feature = "arrow", direct_arrow_insert))]
 fn build_insert_options_c(
     options: &InsertOptions,
 ) -> Result<(*const bindings::chdb_arrow_insert_options, Option<CString>)> {
@@ -445,7 +449,7 @@ fn build_insert_options_c(
     Ok((options_ptr, settings_cstr))
 }
 
-#[cfg(direct_arrow_insert)]
+#[cfg(all(feature = "arrow", direct_arrow_insert))]
 fn check_insert_result(result_ptr: *mut bindings::chdb_result) -> Result<()> {
     if result_ptr.is_null() {
         return Err(Error::NoResult);

@@ -365,8 +365,8 @@ In Rust, build the expression with `arrow_stream_table_sql("my_batch")`.
 
 ```rust
 use std::sync::Arc;
-use arrow::array::{Int64Array, RecordBatch};
-use arrow::datatypes::{DataType, Field, Schema};
+use chdb_rust::arrow::array::{Int64Array, RecordBatch};
+use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
 use chdb_rust::arrow_insert::insert_record_batch;
 use chdb_rust::session::SessionBuilder;
 

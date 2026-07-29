@@ -81,7 +81,20 @@ cargo test -- --test-threads=1
 
 ## Arrow Bulk Insert
 
-The crate includes Apache Arrow bulk insert support via the `arrow` dependency. See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:
+Apache Arrow bulk insert is enabled by default via the `arrow` feature (Arrow 59). Import Arrow types through `chdb_rust::arrow` so your `RecordBatch` types match the crate:
+
+```rust
+use chdb_rust::arrow::array::{Int64Array, RecordBatch};
+use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
+```
+
+SQL-only users can disable it to avoid building Arrow:
+
+```toml
+chdb-rust = { version = "1.4", default-features = false }
+```
+
+See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:
 
 ```bash
 cargo run --example 08_arrow_insert
