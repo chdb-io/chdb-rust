@@ -11,6 +11,7 @@ This document provides simple and easy-to-follow examples for using chdb-rust, a
 5. [Output Formats](#output-formats)
 6. [Reading from Files](#reading-from-files)
 7. [Error Handling](#error-handling)
+8. [Fast Bulk Inserts (Arrow)](#fast-bulk-inserts-arrow)
 
 ## Basic Setup
 
@@ -321,6 +322,77 @@ fn main() -> Result<(), chdb_rust::error::Error> {
     Ok(())
 }
 ```
+
+## Fast Bulk Inserts (Arrow)
+
+For high throughput and low latency, register in-memory Arrow data and insert with `INSERT ... SELECT` from the `ArrowStream` table function. This avoids temp-file Arrow IPC and SQL `VALUES` parsing.
+
+### Ranked ingest paths
+
+| Rank | Method | Notes |
+|------|--------|-------|
+| 1 | `register_arrow_stream` + `INSERT INTO dest SELECT * FROM ArrowStream('n')` | Multi-batch; no disk hop |
+| 2 | `register_arrow_array` + same SQL | Single `RecordBatch` |
+| 3 | `file(path, 'Native')` | Pre-encoded Native files |
+| 4 | `file(path, 'RowBinary')` | Dense binary; requires `structure` in SQL |
+| 5 | `file(path, 'ArrowStream')` | Arrow IPC on disk |
+| 6 | `file(path, 'Parquet')` | Cold bulk loads |
+| 7 | `INSERT ... VALUES` | Fine for demos; worst at scale |
+
+`OutputFormat` on `query()` / `execute()` affects **result** encoding only, not ingest speed.
+
+### SQL syntax
+
+Registration exposes a **table function**, not a MergeTree table:
+
+```sql
+-- Correct
+INSERT INTO dest SELECT * FROM ArrowStream('my_batch');
+
+-- Wrong (UNKNOWN_TABLE)
+SELECT * FROM my_batch;
+```
+
+In Rust, build the expression with `arrow_stream_table_sql("my_batch")`.
+
+### FFI lifetime rules
+
+- Pass raw `FFI_ArrowArrayStream` / `FFI_ArrowSchema` / `FFI_ArrowArray` pointers via [`ArrowStream::from_raw`](https://docs.rs/chdb-rust/latest/chdb_rust/arrow_stream/struct.ArrowStream.html) (not the opaque `chdb_arrow_stream_` typedef in `chdb.h`).
+- Keep backing `RecordBatch` data and FFI structs alive until `unregister_arrow_table` or the connection closes.
+- `chdb_arrow_scan` does not take ownership of the stream; do not free it before unregister.
+
+### High-level helpers
+
+```rust
+use std::sync::Arc;
+use chdb_rust::arrow::array::{Int64Array, RecordBatch};
+use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
+use chdb_rust::arrow_insert::insert_record_batch;
+use chdb_rust::session::SessionBuilder;
+
+let session = SessionBuilder::new()
+    .with_data_path("/tmp/chdb-ingest")
+    .with_auto_cleanup(true)
+    .build()?;
+
+session.execute(
+    "CREATE TABLE IF NOT EXISTS metrics (id Int64) ENGINE=MergeTree ORDER BY id",
+    None,
+)?;
+
+let batch = RecordBatch::try_new(
+    Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)])),
+    vec![Arc::new(Int64Array::from(vec![1i64, 2, 3]))],
+)?;
+
+session.insert_record_batch("metrics", "flush_1", &batch)?;
+```
+
+`insert_record_batches` accepts multiple batches via an Arrow `RecordBatchReader`.
+
+`dest_table` must be a bare ClickHouse table identifier (e.g. `metrics`); dotted names (`db.table`) and reserved words are not quoted automatically.
+
+See `examples/08_arrow_insert.rs` for a runnable program.
 
 ## Additional Resources
 

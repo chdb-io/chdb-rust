@@ -6,7 +6,19 @@
 use std::path::PathBuf;
 use std::{fs, io};
 
+#[cfg(feature = "arrow")]
+use arrow::array::{RecordBatch, RecordBatchReader};
+#[cfg(feature = "arrow")]
+use arrow::datatypes::SchemaRef;
+
 use crate::arg::{extract_output_format, Arg};
+#[cfg(feature = "arrow")]
+use crate::arrow_insert::{
+    insert_record_batch, insert_record_batch_direct, insert_record_batch_reader,
+    insert_record_batches,
+};
+#[cfg(feature = "arrow")]
+use crate::arrow_options::InsertOptions;
 use crate::connection::Connection;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
@@ -331,6 +343,66 @@ impl Session {
     pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
         let fmt = extract_output_format(query_args, self.default_format);
         self.conn.query(query, fmt)
+    }
+
+    /// Access the session's [`Connection`] for Arrow registration and low-level queries.
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
+    #[cfg(feature = "arrow")]
+    pub fn insert_record_batch(
+        &self,
+        dest_table: &str,
+        stream_name: &str,
+        batch: RecordBatch,
+        options: InsertOptions,
+    ) -> Result<()> {
+        insert_record_batch(self.connection(), dest_table, stream_name, batch, options)
+    }
+
+    /// See [`insert_record_batch_direct`](crate::arrow_insert::insert_record_batch_direct).
+    #[cfg(feature = "arrow")]
+    pub fn insert_record_batch_direct(
+        &self,
+        dest_table: &str,
+        batch: RecordBatch,
+        options: InsertOptions,
+    ) -> Result<()> {
+        insert_record_batch_direct(self.connection(), dest_table, batch, options)
+    }
+
+    /// See [`insert_record_batches`](crate::arrow_insert::insert_record_batches).
+    #[cfg(feature = "arrow")]
+    pub fn insert_record_batches(
+        &self,
+        dest_table: &str,
+        stream_name: &str,
+        schema: SchemaRef,
+        batches: Vec<RecordBatch>,
+        options: InsertOptions,
+    ) -> Result<()> {
+        insert_record_batches(
+            self.connection(),
+            dest_table,
+            stream_name,
+            schema,
+            batches,
+            options,
+        )
+    }
+
+    /// See [`insert_record_batch_reader`](crate::arrow_insert::insert_record_batch_reader).
+    #[cfg(feature = "arrow")]
+    pub fn insert_record_batch_reader(
+        &self,
+        dest_table: &str,
+        stream_name: &str,
+        reader: Box<dyn RecordBatchReader + Send>,
+        options: InsertOptions,
+    ) -> Result<()> {
+        insert_record_batch_reader(self.connection(), dest_table, stream_name, reader, options)
     }
 }
 

@@ -25,6 +25,7 @@
 //! - **Stateless queries**: Execute one-off queries without persistent storage
 //! - **Stateful sessions**: Create databases and tables with persistent storage
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
+//! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //!
 //! ## Examples
@@ -37,7 +38,23 @@
 //! All public functions are safe to call, and the crate ensures proper resource cleanup.
 
 pub mod arg;
+#[cfg(feature = "arrow")]
+pub mod arrow_insert;
+#[cfg(feature = "arrow")]
+pub mod arrow_options;
+#[cfg(feature = "arrow")]
 pub mod arrow_stream;
+#[cfg(feature = "arrow")]
+pub use arrow;
+#[cfg(feature = "arrow")]
+pub use arrow_insert::{
+    insert_record_batch, insert_record_batch_direct, insert_record_batch_reader,
+    insert_record_batches,
+};
+#[cfg(feature = "arrow")]
+pub use arrow_options::InsertOptions;
+#[cfg(feature = "arrow")]
+pub use arrow_stream::arrow_stream_table_sql;
 #[allow(
     dead_code,
     unused,

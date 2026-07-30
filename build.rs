@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
+
     if env::var("DOCS_RS").is_ok() {
         return;
     }
@@ -13,7 +15,7 @@ fn main() {
     let libchdb_info = find_libchdb_or_download(&out_path);
     match libchdb_info {
         Ok((lib_dir, header_path)) => {
-            setup_link_paths(&lib_dir);
+            setup_link_paths(&lib_dir, &header_path);
             generate_bindings(&header_path, &out_path);
         }
         Err(e) => {
@@ -136,7 +138,30 @@ fn get_platform_string() -> Result<String, &'static str> {
     }
 }
 
-fn setup_link_paths(lib_dir: &Path) {
+fn lib_exports_symbol(lib_dir: &Path, symbol: &str) -> bool {
+    let lib_path = lib_dir.join("libchdb.so");
+    if !lib_path.exists() {
+        return false;
+    }
+    let output = Command::new("nm")
+        .args(["-D", lib_path.to_str().unwrap_or_default()])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout.contains(symbol)
+        }
+        _ => false,
+    }
+}
+
+fn header_declares_direct_insert(header_path: &Path) -> bool {
+    fs::read_to_string(header_path)
+        .map(|s| s.contains("chdb_insert_arrow_array"))
+        .unwrap_or(false)
+}
+
+fn setup_link_paths(lib_dir: &Path, header_path: &Path) {
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-search=native=./");
     println!("cargo:rustc-link-search=native=/usr/local/lib");
@@ -162,11 +187,27 @@ fn setup_link_paths(lib_dir: &Path) {
         println!("cargo:rustc-link-lib=chdb");
     }
 
+    if header_declares_direct_insert(header_path)
+        && lib_exports_symbol(lib_dir, "chdb_insert_arrow_array")
+    {
+        println!("cargo:rustc-cfg=direct_arrow_insert");
+    }
+
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={}", header_path.display());
+    if lib_dir.join("libchdb.so").exists() {
+        println!(
+            "cargo:rerun-if-changed={}",
+            lib_dir.join("libchdb.so").display()
+        );
+    }
 }
 
 fn generate_bindings(header_path: &Path, out_dir: &Path) {
+    let header_path = header_path
+        .canonicalize()
+        .unwrap_or_else(|_| header_path.to_path_buf());
     let wrapper_content = format!("#include \"{}\"", header_path.display());
     let temp_wrapper = out_dir.join("temp_wrapper.h");
     if fs::read_to_string(&temp_wrapper)
