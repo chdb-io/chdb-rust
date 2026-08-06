@@ -5,7 +5,7 @@
 //! [`arrow::record_batch::RecordBatch`] values directly from chDB with no
 //! IPC serialization.
 //!
-//! Run with: cargo run --features arrow --example 10_arrow_query_stream
+//! Run with: cargo run --example 11_arrow_query_stream
 
 use arrow::util::pretty::pretty_format_batches;
 use chdb_rust::session::SessionBuilder;

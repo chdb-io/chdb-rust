@@ -3,7 +3,7 @@
 //! Each chunk from the stream is raw Arrow IPC stream bytes. This example
 //! decodes those bytes into record batches and prints them as human-readable tables.
 //!
-//! Run with: cargo run --example 09_query_streaming_arrow
+//! Run with: cargo run --example 10_query_streaming_arrow
 
 use std::io::Cursor;
 

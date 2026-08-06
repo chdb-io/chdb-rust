@@ -139,9 +139,9 @@ fn main() -> Result<(), chdb_rust::error::Error> {
 
 For large result sets, avoid loading everything into a `QueryResult` at once. Use streaming instead:
 
-- **Text or other output formats** — [`examples/08_query_streaming.rs`](../examples/08_query_streaming.rs) shows how to pull result chunks with `Session::execute_stream` and a format such as `JSONEachRow`.
-- **Arrow IPC stream bytes** — [`examples/09_query_streaming_arrow.rs`](../examples/09_query_streaming_arrow.rs) streams raw Arrow IPC data through `execute_stream` with `OutputFormat::ArrowStream`, then decodes each chunk with the Arrow `StreamReader`.
-- **Typed Arrow record batches** — [`examples/10_arrow_query_stream.rs`](../examples/10_arrow_query_stream.rs) uses `Session::execute_stream_arrow` to receive `RecordBatch` values directly via the Arrow C Data Interface, with no IPC serialization. Requires the `arrow` feature: `cargo run --features arrow --example 10_arrow_query_stream`.
+- **Text or other output formats** — [`examples/09_query_streaming.rs`](../examples/09_query_streaming.rs) shows how to pull result chunks with `Session::execute_stream` and a format such as `JSONEachRow`.
+- **Arrow IPC stream bytes** — [`examples/10_query_streaming_arrow.rs`](../examples/10_query_streaming_arrow.rs) streams raw Arrow IPC data through `execute_stream` with `OutputFormat::ArrowStream`, then decodes each chunk with the Arrow `StreamReader`.
+- **Typed Arrow record batches** — [`examples/11_arrow_query_stream.rs`](../examples/11_arrow_query_stream.rs) uses `Session::execute_stream_arrow` to receive `RecordBatch` values directly via the Arrow C Data Interface, with no IPC serialization. Requires the `arrow` feature: `cargo run --example 11_arrow_query_stream`.
 
 ## Output Formats
 

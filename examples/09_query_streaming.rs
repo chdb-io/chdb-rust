@@ -1,6 +1,6 @@
 //! Example: streaming query results
 //!
-//! Run with: cargo run --example 08_query_streaming
+//! Run with: cargo run --example 09_query_streaming
 
 use chdb_rust::arg::Arg;
 use chdb_rust::format::OutputFormat;
