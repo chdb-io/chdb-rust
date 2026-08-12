@@ -59,17 +59,18 @@ case "$(uname -s)" in
         ;;
 esac
 
-# Main download URL
+# One URL, and a failure is a failure. There used to be a fallback to
+# releases/latest, which answered "this version could not be downloaded" by
+# fetching a different version and saying nothing. That makes a build
+# irreproducible for the same reason an unpinned version does, and it defeats the
+# release check outright: the check would run against whatever was newest, report
+# the version it was asked about as passing, and propose pinning a tag nothing
+# ever built.
 DOWNLOAD_URL="https://github.com/chdb-io/chdb-core/releases/download/$LATEST_RELEASE/$PLATFORM"
-FALLBACK_URL="https://github.com/chdb-io/chdb-core/releases/latest/download/$PLATFORM"
 
-# Try the main download URL first
 if ! download_and_extract "$DOWNLOAD_URL"; then
-    echo "Retrying with fallback URL..."
-    if ! download_and_extract "$FALLBACK_URL"; then
-        echo "Both primary and fallback downloads failed. Aborting."
-        exit 1
-    fi
+    echo "Could not download $PLATFORM for $LATEST_RELEASE. Aborting." >&2
+    exit 1
 fi
 
 chmod +x libchdb.so

@@ -74,10 +74,15 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    // CHDB_ENGINE_VERSION overrides the pin, the same way update_libchdb.sh
-    // treats it, so a build can be pointed at one specific engine.
+    // CHDB_ENGINE_VERSION overrides the pin, so a build can be pointed at one
+    // specific engine. Empty counts as unset, matching what `${VAR:-default}` in
+    // update_libchdb.sh does — otherwise an empty value here builds a URL with
+    // no version segment while the shell script quietly uses the pin.
     println!("cargo:rerun-if-env-changed=CHDB_ENGINE_VERSION");
-    let version = env::var("CHDB_ENGINE_VERSION").unwrap_or_else(|_| CHDB_ENGINE_PIN.to_string());
+    let version = env::var("CHDB_ENGINE_VERSION")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| CHDB_ENGINE_PIN.to_string());
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
 
