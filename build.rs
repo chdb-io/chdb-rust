@@ -69,7 +69,10 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    let version = "v26.5.0";
+    // Keep this in step with LATEST_RELEASE in update_libchdb.sh. Both honour
+    // CHDB_ENGINE_VERSION so a build can be pointed at one specific engine.
+    println!("cargo:rerun-if-env-changed=CHDB_ENGINE_VERSION");
+    let version = env::var("CHDB_ENGINE_VERSION").unwrap_or_else(|_| "v26.5.0".to_string());
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
 

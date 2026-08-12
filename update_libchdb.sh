@@ -28,8 +28,10 @@ download_and_extract() {
     return 1
 }
 
-# Get the newest release version
-LATEST_RELEASE=v26.5.0
+# The engine this crate is developed against. CHDB_ENGINE_VERSION overrides it,
+# which is how the release-check workflow runs the suite against an engine this
+# repository has not adopted yet.
+LATEST_RELEASE="${CHDB_ENGINE_VERSION:-v26.5.0}"
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
