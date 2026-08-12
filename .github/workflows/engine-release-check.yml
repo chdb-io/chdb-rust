@@ -67,8 +67,79 @@ jobs:
         env:
           RUST_BACKTRACE: full
 
-  report:
+  # Green means the engine can be adopted, not that it has been. Adoption is a
+  # one-line change to a pinned version and goes through review like any other
+  # dependency bump; this only writes the line — in both places, since build.rs
+  # picks the engine when update_libchdb.sh has not already left one behind.
+  propose_bump:
     needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr: ${{ steps.bump.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: bump
+        name: Open a PR moving the pin to this engine
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENGINE_VERSION: ${{ github.event.client_payload.tag || github.event.inputs.engine_version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          current=$(grep -E '^CHDB_ENGINE_PIN=' update_libchdb.sh | cut -d= -f2)
+          if [ "$current" = "$ENGINE_VERSION" ]; then
+            echo "already pinned to $ENGINE_VERSION, nothing to propose"
+            exit 0
+          fi
+
+          branch="engine-pin-$ENGINE_VERSION"
+          if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != 0 ]; then
+            echo "a PR for $ENGINE_VERSION is already open"
+            exit 0
+          fi
+
+          git switch -c "$branch"
+          sed -i "s|^CHDB_ENGINE_PIN=.*|CHDB_ENGINE_PIN=$ENGINE_VERSION|" update_libchdb.sh
+          sed -i "s|^const CHDB_ENGINE_PIN: &str = .*|const CHDB_ENGINE_PIN: \&str = \"$ENGINE_VERSION\";|" build.rs
+
+          # Both files carry the pin, and a bump that moves only one of them puts
+          # the linked engine and the loaded engine on different builds.
+          for f in update_libchdb.sh build.rs; do
+            grep -q "$ENGINE_VERSION" "$f" || { echo "::error::$f was not rewritten"; exit 1; }
+          done
+
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -am "Move the engine pin from $current to $ENGINE_VERSION"
+          git push -u origin "$branch"
+
+          {
+            echo "The release check built and ran the tests against \`$ENGINE_VERSION\` and"
+            echo "they passed, so the engine can be adopted. This moves the pin"
+            echo "$current → \`$ENGINE_VERSION\` in both \`update_libchdb.sh\` and \`build.rs\`."
+            echo
+            echo "$RUN_URL"
+            echo
+            echo "No checks will appear here. GitHub does not start workflow runs for"
+            echo "commits a workflow pushed with \`GITHUB_TOKEN\`, and running CI on this"
+            echo "branch would exercise the same tests against the same engine the check"
+            echo "just used."
+          } > pr-body.md
+
+          url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" \
+            --title "Move the engine pin to $ENGINE_VERSION" \
+            --body-file pr-body.md)
+          echo "pr=$url" >> "$GITHUB_OUTPUT"
+          echo "$url"
+
+  report:
+    needs: [test, propose_bump]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -78,6 +149,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RESULT: ${{ needs.test.result }}
+          BUMP_PR: ${{ needs.propose_bump.outputs.pr }}
           ENGINE_VERSION: ${{ github.event.client_payload.tag || github.event.inputs.engine_version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -93,6 +165,10 @@ jobs:
             echo "chdb-rust $verdict against chdb-core \`$ENGINE_VERSION\`."
             echo
             echo "$RUN_URL"
+            if [ -n "$BUMP_PR" ]; then
+              echo
+              echo "Adopting it: $BUMP_PR"
+            fi
             if [ "$RESULT" != success ]; then
               echo
               echo "This does not mean the pinned engine is broken — update_libchdb.sh is"

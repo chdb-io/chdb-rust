@@ -3,6 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The engine this crate is developed against, used when no libchdb is already
+/// present. Keep it on its own line and in step with CHDB_ENGINE_PIN in
+/// update_libchdb.sh: the release check greps for both when it proposes a bump.
+const CHDB_ENGINE_PIN: &str = "v26.5.0";
+
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
 
@@ -69,10 +74,10 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
 
 fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let platform = get_platform_string()?;
-    // Keep this in step with LATEST_RELEASE in update_libchdb.sh. Both honour
-    // CHDB_ENGINE_VERSION so a build can be pointed at one specific engine.
+    // CHDB_ENGINE_VERSION overrides the pin, the same way update_libchdb.sh
+    // treats it, so a build can be pointed at one specific engine.
     println!("cargo:rerun-if-env-changed=CHDB_ENGINE_VERSION");
-    let version = env::var("CHDB_ENGINE_VERSION").unwrap_or_else(|_| "v26.5.0".to_string());
+    let version = env::var("CHDB_ENGINE_VERSION").unwrap_or_else(|_| CHDB_ENGINE_PIN.to_string());
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
 

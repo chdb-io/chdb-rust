@@ -28,10 +28,14 @@ download_and_extract() {
     return 1
 }
 
-# The engine this crate is developed against. CHDB_ENGINE_VERSION overrides it,
-# which is how the release-check workflow runs the suite against an engine this
-# repository has not adopted yet.
-LATEST_RELEASE="${CHDB_ENGINE_VERSION:-v26.5.0}"
+# The engine this crate is developed against. Keep it on its own line and
+# literal, and in step with CHDB_ENGINE_PIN in build.rs: the release check greps
+# for both when it proposes a bump.
+CHDB_ENGINE_PIN=v26.5.0
+
+# CHDB_ENGINE_VERSION overrides the pin, which is how the release check runs the
+# suite against an engine this repository has not adopted yet.
+LATEST_RELEASE="${CHDB_ENGINE_VERSION:-$CHDB_ENGINE_PIN}"
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
