@@ -28,8 +28,14 @@ download_and_extract() {
     return 1
 }
 
-# Get the newest release version
-LATEST_RELEASE=v26.5.0
+# The engine this crate is developed against. Keep it on its own line and
+# literal, and in step with CHDB_ENGINE_PIN in build.rs: the release check greps
+# for both when it proposes a bump.
+CHDB_ENGINE_PIN=v26.5.0
+
+# CHDB_ENGINE_VERSION overrides the pin, which is how the release check runs the
+# suite against an engine this repository has not adopted yet.
+LATEST_RELEASE="${CHDB_ENGINE_VERSION:-$CHDB_ENGINE_PIN}"
 
 # Select the correct package based on OS and architecture
 case "$(uname -s)" in
@@ -53,17 +59,18 @@ case "$(uname -s)" in
         ;;
 esac
 
-# Main download URL
+# One URL, and a failure is a failure. There used to be a fallback to
+# releases/latest, which answered "this version could not be downloaded" by
+# fetching a different version and saying nothing. That makes a build
+# irreproducible for the same reason an unpinned version does, and it defeats the
+# release check outright: the check would run against whatever was newest, report
+# the version it was asked about as passing, and propose pinning a tag nothing
+# ever built.
 DOWNLOAD_URL="https://github.com/chdb-io/chdb-core/releases/download/$LATEST_RELEASE/$PLATFORM"
-FALLBACK_URL="https://github.com/chdb-io/chdb-core/releases/latest/download/$PLATFORM"
 
-# Try the main download URL first
 if ! download_and_extract "$DOWNLOAD_URL"; then
-    echo "Retrying with fallback URL..."
-    if ! download_and_extract "$FALLBACK_URL"; then
-        echo "Both primary and fallback downloads failed. Aborting."
-        exit 1
-    fi
+    echo "Could not download $PLATFORM for $LATEST_RELEASE. Aborting." >&2
+    exit 1
 fi
 
 chmod +x libchdb.so
