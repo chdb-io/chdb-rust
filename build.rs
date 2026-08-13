@@ -6,7 +6,7 @@ use std::process::Command;
 /// The engine this crate is developed against, used when no libchdb is already
 /// present. Keep it on its own line and in step with CHDB_ENGINE_PIN in
 /// update_libchdb.sh: the release check greps for both when it proposes a bump.
-const CHDB_ENGINE_PIN: &str = "v26.5.0";
+const CHDB_ENGINE_PIN: &str = "v26.7.0";
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
