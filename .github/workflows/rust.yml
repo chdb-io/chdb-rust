@@ -10,6 +10,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Seconds, and ahead of the build, because a pin that disagrees with itself
+  # makes everything after it a test of an engine nobody chose.
+  engine_pin:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: .github/scripts/check-engine-pin.sh
+
   build:
     runs-on: ubuntu-latest
     steps:

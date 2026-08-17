@@ -53,6 +53,17 @@ required-features = ["arrow"]
 name = "arrow_stream_roundtrip"
 required-features = ["arrow"]
 
+[package.metadata.chdb]
+# The chdb-core release this crate builds against. The crate version above says
+# nothing about it — 1.4.0 is this crate's own numbering — so without this there
+# is no way to tell which ClickHouse a published version carries short of reading
+# build.rs at the matching tag. Here it travels with the package and can be read
+# from `cargo metadata` or the crates.io API.
+#
+# .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
+# update_libchdb.sh, which are what actually fetch the engine.
+engine = "v26.7.0"
+
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.
 # Setting DOCS_RS env var tells build.rs to skip native build steps.
