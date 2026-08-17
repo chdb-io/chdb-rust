@@ -145,12 +145,16 @@ jobs:
           git switch -c "$branch"
           sed -i "s|^CHDB_ENGINE_PIN=.*|CHDB_ENGINE_PIN=$ENGINE_VERSION|" update_libchdb.sh
           sed -i "s|^const CHDB_ENGINE_PIN: &str = .*|const CHDB_ENGINE_PIN: \&str = \"$ENGINE_VERSION\";|" build.rs
+          # Only the engine key under [package.metadata.chdb], so the neighbouring
+          # docs.rs table is left alone.
+          sed -i "/^\[package\.metadata\.chdb\]/,/^\[package\.metadata\.docs\.rs\]/ \
+            s|^engine = \".*\"$|engine = \"$ENGINE_VERSION\"|" Cargo.toml
 
-          # Both files carry the pin, and a bump that moves only one of them puts
-          # the linked engine and the loaded engine on different builds.
-          for f in update_libchdb.sh build.rs; do
-            grep -q "$ENGINE_VERSION" "$f" || { echo "::error::$f was not rewritten"; exit 1; }
-          done
+          # Three files carry the pin. A bump that moves some of them puts the
+          # linked engine, the installed engine and what the crate tells a user on
+          # different footings — and leaves a pull request that cannot pass its own
+          # checks, so the automation would be proposing work it had blocked.
+          .github/scripts/check-engine-pin.sh
 
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
@@ -170,7 +174,10 @@ jobs:
           {
             echo "The release check built and ran the tests against \`$ENGINE_VERSION\` and"
             echo "they passed, so the engine can be adopted. This moves the pin"
-            echo "$current → \`$ENGINE_VERSION\` in both \`update_libchdb.sh\` and \`build.rs\`."
+            echo "$current → \`$ENGINE_VERSION\` in all three places that carry it:"
+            echo "\`update_libchdb.sh\`, \`build.rs\`, and \`engine\` under"
+            echo "\`[package.metadata.chdb]\` in \`Cargo.toml\`, which is what tells a user"
+            echo "of the published crate which ClickHouse is inside it."
             echo
             echo "$RUN_URL"
             echo

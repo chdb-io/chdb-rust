@@ -15,6 +15,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # cargo publish runs with --no-verify, so nothing is built here and build.rs
+      # never executes — the pin is never exercised on the way out. This is the
+      # last point at which a crate claiming an engine it does not carry can be
+      # stopped: a crates.io version cannot be replaced afterwards, only yanked.
+      - name: The engine pin has to agree with itself
+        run: .github/scripts/check-engine-pin.sh
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
