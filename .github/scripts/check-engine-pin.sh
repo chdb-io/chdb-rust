@@ -10,13 +10,15 @@
 # The first two disagreeing means the engine a build links against is not the one
 # the script put there, which surfaces as missing symbols or as behaviour that
 # does not match the version anyone thinks they are running. The third disagreeing
-# is quieter and worse: the crate says it carries one ClickHouse and carries
-# another, and a crates.io version cannot be replaced — only yanked — so it says
-# the wrong thing permanently.
+# is quieter and worse: the crate names one engine and carries another, and a
+# crates.io version cannot be replaced — only yanked — so it says the wrong thing
+# permanently.
 #
-# Only vX.Y.Z and vX.Y.Z-rc.N are accepted. Those are the two shapes chdb-core
-# tags and the two the other bindings can parse, so a pin outside them is either a
-# typo or a tag nothing downstream can consume.
+# Only vX.Y.Z and vX.Y.Z-rc.N are accepted, which is chdb-core's tag shape: X.Y is
+# the ClickHouse minor line the release sits on and Z is chdb-core's own counter.
+# ClickHouse tags its own releases with four fields, so a four-field pin names a
+# tag in the wrong repository rather than a newer engine. Anything else is a typo
+# or a tag the other bindings cannot parse.
 
 set -euo pipefail
 

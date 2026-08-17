@@ -54,11 +54,17 @@ name = "arrow_stream_roundtrip"
 required-features = ["arrow"]
 
 [package.metadata.chdb]
-# The chdb-core release this crate builds against. The crate version above says
-# nothing about it — 1.4.0 is this crate's own numbering — so without this there
-# is no way to tell which ClickHouse a published version carries short of reading
-# build.rs at the matching tag. Here it travels with the package and can be read
-# from `cargo metadata` or the crates.io API.
+# The chdb-core release this crate builds against. This is a chdb-core release
+# number, not a ClickHouse one: X.Y is the ClickHouse minor line the release sits
+# on and Z is chdb-core's own counter, so v26.7.0 carries some ClickHouse 26.7
+# rather than a ClickHouse 26.7.0. The chdb-core release notes for the tag name
+# the exact upstream build.
+#
+# The crate version above is unrelated — 1.4.0 is this crate's own numbering — so
+# without this key there is no way to tell which engine a published version
+# carries short of reading build.rs at the matching tag. Here it travels with the
+# package, readable through `cargo metadata`, the .crate archive or the docs.rs
+# source view; the crates.io API does not expose it.
 #
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.

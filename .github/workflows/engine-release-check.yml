@@ -177,7 +177,7 @@ jobs:
             echo "$current → \`$ENGINE_VERSION\` in all three places that carry it:"
             echo "\`update_libchdb.sh\`, \`build.rs\`, and \`engine\` under"
             echo "\`[package.metadata.chdb]\` in \`Cargo.toml\`, which is what tells a user"
-            echo "of the published crate which ClickHouse is inside it."
+            echo "of the published crate which engine is inside it."
             echo
             echo "$RUN_URL"
             echo
