@@ -19,6 +19,11 @@ jobs:
     - run: .github/scripts/check-engine-pin.sh
 
   build:
+    # Not merely ordered before the build — a gate on it. Without this the two run
+    # side by side, and a disagreeing pin still downloads an engine, links against
+    # it and reports test results for it, which is exactly the misleading outcome
+    # the check exists to prevent.
+    needs: engine_pin
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3

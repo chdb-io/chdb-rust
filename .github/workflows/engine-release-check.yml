@@ -174,7 +174,10 @@ jobs:
           {
             echo "The release check built and ran the tests against \`$ENGINE_VERSION\` and"
             echo "they passed, so the engine can be adopted. This moves the pin"
-            echo "$current → \`$ENGINE_VERSION\` in both \`update_libchdb.sh\` and \`build.rs\`."
+            echo "$current → \`$ENGINE_VERSION\` in all three places that carry it:"
+            echo "\`update_libchdb.sh\`, \`build.rs\`, and \`engine\` under"
+            echo "\`[package.metadata.chdb]\` in \`Cargo.toml\`, which is what tells a user"
+            echo "of the published crate which ClickHouse is inside it."
             echo
             echo "$RUN_URL"
             echo
