@@ -16,13 +16,12 @@ use chdb_rust::session::SessionBuilder;
 const PREVIEW_ROWS: usize = 5;
 
 fn print_arrow_chunk(chunk_index: usize, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = StreamReader::try_new(Cursor::new(bytes), None)?;
+    let reader = StreamReader::try_new(Cursor::new(bytes), None)?;
     let schema = reader.schema();
 
     println!("chunk {chunk_index} (schema: {schema})");
 
-    let mut batch_index = 0;
-    while let Some(batch) = reader.next() {
+    for (batch_index, batch) in reader.enumerate() {
         let batch = batch?;
         let row_count = batch.num_rows();
         let preview = if row_count > PREVIEW_ROWS {
@@ -39,7 +38,6 @@ fn print_arrow_chunk(chunk_index: usize, bytes: &[u8]) -> Result<(), Box<dyn std
                 remaining = row_count - PREVIEW_ROWS
             );
         }
-        batch_index += 1;
     }
 
     Ok(())
@@ -67,15 +65,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     println!("Streaming query results (Arrow IPC stream):\n");
-    let mut chunk_count = 0;
     let mut total_rows = 0u64;
-    for chunk in stream {
+    let mut num_chunks = 0;
+    for (chunk_index, chunk) in stream.enumerate() {
         let chunk = chunk?;
         total_rows += chunk.rows_read();
-        print_arrow_chunk(chunk_count, chunk.data_ref())?;
-        chunk_count += 1;
+        print_arrow_chunk(chunk_index, chunk.data_ref())?;
+        num_chunks = chunk_index + 1;
     }
 
-    println!("\nReceived {chunk_count} chunks, {total_rows} rows total.");
+    println!("\nReceived {num_chunks} chunks, {total_rows} rows total.");
     Ok(())
 }

@@ -27,9 +27,7 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
     )?;
 
-    let mut chunk_num = 0;
-
-    for chunk in stream {
+    for (chunk_num, chunk) in stream.enumerate() {
         let chunk = chunk?;
         let rows_read = chunk.rows_read() as usize;
         println!("Chunk {chunk_num}, rows read: {}", rows_read);
@@ -43,8 +41,6 @@ fn main() -> Result<(), chdb_rust::error::Error> {
                 println!("{line}");
             }
         }
-
-        chunk_num += 1;
     }
 
     Ok(())
