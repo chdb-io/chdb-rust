@@ -28,9 +28,11 @@ enum QueryStreamConnection<'a> {
 ///
 /// # Thread Safety
 ///
-/// `QueryStream` implements `Send`, meaning it can be safely transferred between threads.
-/// However, like [`Connection`](crate::connection::Connection), concurrent use from multiple
-/// threads is not recommended without external synchronization.
+/// Only owned streams (for example from [`execute_stream`](crate::execute_stream)) implement
+/// [`Send`]. Streams tied to a borrowed [`Connection`](crate::connection::Connection) or
+/// [`Session`](crate::session::Session) do not, because [`Connection`] is [`Send`] but not
+/// [`Sync`]. Concurrent use from multiple threads is not recommended without external
+/// synchronization.
 ///
 /// # Examples
 ///
@@ -166,13 +168,14 @@ impl<'a> QueryStream<'a> {
 
         let chunk = QueryResult::new(chunk_ptr);
 
+        chunk.check_error_ref()?;
+
         if chunk.rows_read() == 0 {
             drop(chunk);
             self.finished = true;
             return Ok(None);
         }
 
-        chunk.check_error_ref()?;
         Ok(Some(chunk))
     }
 
@@ -218,9 +221,10 @@ impl Drop for QueryStream<'_> {
     }
 }
 
-// Safety: QueryStream is safe to send between threads when backed by a Connection.
-// The underlying chDB library handles thread-safe query execution.
-unsafe impl Send for QueryStream<'_> {}
+// Safety: Only the owned variant (`QueryStream<'static>` from `execute_stream`) is Send.
+// It owns the Connection outright. Borrowed streams hold `&Connection` and must stay on
+// the thread that owns the connection because Connection is Send but !Sync.
+unsafe impl Send for QueryStream<'static> {}
 
 #[cfg(test)]
 mod tests {

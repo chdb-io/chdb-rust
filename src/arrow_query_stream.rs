@@ -33,15 +33,21 @@ enum ArrowQueryStreamConnection<'a> {
 ///
 /// # Thread Safety
 ///
-/// `ArrowQueryStream` implements `Send`, but concurrent use from multiple threads is not
-/// recommended without external synchronization.
+/// Only owned streams (for example from [`execute_stream_arrow`](crate::execute_stream_arrow))
+/// implement [`Send`]. Streams tied to a borrowed [`Connection`](crate::connection::Connection)
+/// or [`Session`](crate::session::Session) do not, because [`Connection`] is [`Send`] but not
+/// [`Sync`]. Concurrent use from multiple threads is not recommended without external
+/// synchronization.
 pub struct ArrowQueryStream<'a> {
     conn: ArrowQueryStreamConnection<'a>,
     inner: *mut bindings::chdb_result,
     finished: bool,
 }
 
-unsafe impl Send for ArrowQueryStream<'_> {}
+// Safety: Only the owned variant (`ArrowQueryStream<'static>` from `execute_stream_arrow`) is
+// Send. It owns the Connection outright. Borrowed streams hold `&Connection` and must stay on
+// the thread that owns the connection because Connection is Send but !Sync.
+unsafe impl Send for ArrowQueryStream<'static> {}
 
 impl<'a> ArrowQueryStream<'a> {
     pub(crate) fn start_borrowed(conn: &'a Connection, sql: &str) -> Result<Self> {
