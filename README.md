@@ -91,6 +91,39 @@ fall-through to the download, so a build never quietly links a different engine
 than the one asked for. The build re-runs when the library file changes, which is
 what makes iterating against an engine that is still being rebuilt work.
 
+## Which Engine Is Linked
+
+Three accessors, each reporting exactly one versioning scheme. A chdb-core
+release number is not a ClickHouse one — `X.Y` is the ClickHouse minor line the
+release sits on and `Z` is chdb-core's own counter — so the two cannot be
+compared, and none of these answers with the other's number when its own source
+is unavailable.
+
+| | scheme | resolved |
+| --- | --- | --- |
+| `version::EXPECTED_ENGINE_VERSION` | chdb-core | at compile time, `Option<&str>` |
+| `version::engine_version()` | chdb-core | by the linked library |
+| `version::clickhouse_version()` | ClickHouse | by `SELECT version()` |
+
+```rust
+use chdb_rust::version::{clickhouse_version, engine_version, ENGINE_SOURCE};
+
+println!("engine    {}", engine_version()?);       // 26.7.0
+println!("clickhouse {}", clickhouse_version()?);  // 26.7.2.1
+println!("from      {}", ENGINE_SOURCE);           // download: chdb-core v26.7.0
+```
+
+`EXPECTED_ENGINE_VERSION` is `None` whenever the build linked a library it did
+not fetch — a `CHDB_LIB_DIR` build, a copy already installed on the machine. The
+pinned version says nothing about an artifact that came from somewhere else, so
+it reports nothing rather than reporting the pin; `ENGINE_SOURCE` says where the
+library came from. `engine_version()` is the only one that describes the artifact
+actually loaded, which makes it the way to confirm which engine a binary carries.
+
+It needs `chdb_version()`, which arrived in chdb-core v26.7.0; against an older
+library it returns `Error::EngineVersionUnavailable` rather than falling back to
+`SELECT version()`.
+
 ## Testing
 
 Run the test suite:
