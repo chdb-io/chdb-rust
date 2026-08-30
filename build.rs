@@ -19,54 +19,195 @@ fn main() {
     let out_path = PathBuf::from(&out_dir);
     let libchdb_info = find_libchdb_or_download(&out_path);
     match libchdb_info {
-        Ok((lib_dir, header_path)) => {
-            setup_link_paths(&lib_dir, &header_path);
+        Ok((lib_path, header_path)) => {
+            setup_link_paths(&lib_path, &header_path);
             generate_bindings(&header_path, &out_path);
         }
         Err(e) => {
             eprintln!("Failed to find or download libchdb: {e}");
-            println!("cargo:warning=Failed to find libchdb. Please install manually using './update_libchdb.sh --local' or '--global'");
+            // cargo:warning is what a plain `cargo build` shows; the build
+            // script's own stderr only appears under --verbose or on the second
+            // run. The reason has to go here or the user sees nothing but
+            // "failed to run custom build command".
+            println!("cargo:warning=Failed to find libchdb: {e}");
+            println!("cargo:warning=Install one with './update_libchdb.sh --local' or '--global', or set CHDB_LIB_DIR (plus CHDB_INCLUDE_DIR when the header is not next to the library)");
             std::process::exit(1);
         }
     }
 }
 
+/// Whether the enabled features ask rustc to link the engine statically.
+///
+/// Every place that has to name a file on disk goes through this and
+/// [`lib_file_names`]: discovery, the download's chmod, the link directive and the
+/// rerun-if-changed line all have to agree about which artifact is in play.
+/// Disagreeing is what made `--features static` fail on any machine that already
+/// had a `libchdb.so` — discovery found the dynamic library, skipped the download,
+/// and rustc was then asked for a static one that had never been fetched.
+fn is_static() -> bool {
+    env::var_os("CARGO_FEATURE_STATIC").is_some()
+}
+
+/// The names the linked artifact can have, in preference order.
+///
+/// chdb-core ships the dynamic library as `libchdb.so` on macOS as well, so that
+/// name comes first on every platform; `.dylib` is accepted because a locally
+/// built or renamed copy is a reasonable thing to point `CHDB_LIB_DIR` at.
+fn lib_file_names() -> &'static [&'static str] {
+    if is_static() {
+        &["libchdb.a"]
+    } else {
+        &["libchdb.so", "libchdb.dylib"]
+    }
+}
+
+/// The artifact for the current linkage in `dir`, if there is one.
+fn find_lib_in(dir: &Path) -> Option<PathBuf> {
+    lib_file_names()
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+}
+
+/// A directory named by an environment variable. Empty counts as unset, matching
+/// how `${VAR:-default}` behaves in update_libchdb.sh.
+fn env_dir(var: &str) -> Option<PathBuf> {
+    env::var(var)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Resolves the engine to build against, as `(artifact, header)`.
+///
+/// In order: whatever `CHDB_LIB_DIR` / `CHDB_INCLUDE_DIR` name, then a copy
+/// already on the machine, then a download of the pinned engine.
 fn find_libchdb_or_download(
     out_dir: &Path,
 ) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
-    if let Some((lib_dir, header_path)) = find_existing_libchdb() {
-        return Ok((lib_dir, header_path));
+    // Both are read here rather than inside the branches below, so the build
+    // re-runs when either changes even on the paths that ignore them.
+    println!("cargo:rerun-if-env-changed=CHDB_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=CHDB_INCLUDE_DIR");
+    let header_override = header_from_env()?;
+
+    if let Some(lib_dir) = env_dir("CHDB_LIB_DIR") {
+        return libchdb_from_lib_dir(&lib_dir, header_override);
+    }
+
+    if let Some((lib_path, header_path)) = find_existing_libchdb() {
+        return Ok((lib_path, header_override.unwrap_or(header_path)));
     }
 
     println!("cargo:warning=libchdb not found locally, attempting to download...");
     download_libchdb_to_out_dir(out_dir)?;
-    let lib_dir = out_dir.to_path_buf();
-    let header_path = out_dir.join("chdb.h");
+
+    let lib_path = find_lib_in(out_dir).ok_or_else(|| {
+        format!(
+            "the downloaded archive contains none of {:?}, which the {} linkage needs",
+            lib_file_names(),
+            linkage_name()
+        )
+    })?;
+    let header_path = header_override.unwrap_or_else(|| out_dir.join("chdb.h"));
 
     if !header_path.exists() {
         return Err("Header file not found after download".into());
     }
 
-    Ok((lib_dir, header_path))
+    Ok((lib_path, header_path))
+}
+
+fn linkage_name() -> &'static str {
+    if is_static() {
+        "static"
+    } else {
+        "dynamic"
+    }
+}
+
+/// The header named by `CHDB_INCLUDE_DIR`, if it is set.
+///
+/// Separate from `CHDB_LIB_DIR` because a chdb-core build tree does not keep the
+/// two together: `chdb/build/build_static_lib.sh` leaves `libchdb.a` at the
+/// repository root while the header stays at `programs/local/chdb.h`. Requiring
+/// them to be adjacent would mean copying a gigabyte-sized archive around to
+/// build against one.
+fn header_from_env() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    let Some(include_dir) = env_dir("CHDB_INCLUDE_DIR") else {
+        return Ok(None);
+    };
+    let header_path = include_dir.join("chdb.h");
+    if !header_path.exists() {
+        return Err(format!(
+            "CHDB_INCLUDE_DIR is {} but there is no chdb.h in it",
+            include_dir.display()
+        )
+        .into());
+    }
+    Ok(Some(header_path))
+}
+
+/// The engine under `CHDB_LIB_DIR`.
+///
+/// A directory that is set but unusable is an error, never a fall-through to the
+/// download. Quietly fetching the pinned engine instead would produce a green
+/// build that tested a different engine than the one asked for — the failure this
+/// hatch exists to let people investigate is exactly the kind that a substituted
+/// artifact hides.
+fn libchdb_from_lib_dir(
+    lib_dir: &Path,
+    header_override: Option<PathBuf>,
+) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+    let lib_path = find_lib_in(lib_dir).ok_or_else(|| {
+        format!(
+            "CHDB_LIB_DIR is {} but it contains none of {:?}, which the {} linkage needs",
+            lib_dir.display(),
+            lib_file_names(),
+            linkage_name()
+        )
+    })?;
+
+    let header_path = match header_override {
+        Some(header_path) => header_path,
+        None => {
+            let adjacent = lib_dir.join("chdb.h");
+            if !adjacent.exists() {
+                return Err(format!(
+                    "found {} but no chdb.h next to it; set CHDB_INCLUDE_DIR to the directory \
+                     holding the matching header (a chdb-core build tree keeps it in \
+                     programs/local)",
+                    lib_path.display()
+                )
+                .into());
+            }
+            adjacent
+        }
+    };
+
+    println!(
+        "cargo:warning=using libchdb from CHDB_LIB_DIR: {} (header {})",
+        lib_path.display(),
+        header_path.display()
+    );
+    Ok((lib_path, header_path))
 }
 
 fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
-    if Path::new("./libchdb.so").exists() && Path::new("./chdb.h").exists() {
-        return Some((PathBuf::from("."), PathBuf::from("./chdb.h")));
+    if let Some(lib_path) = find_lib_in(Path::new(".")) {
+        if Path::new("./chdb.h").exists() {
+            return Some((lib_path, PathBuf::from("./chdb.h")));
+        }
     }
 
     // Check system installation
     let system_lib_path = Path::new("/usr/local/lib");
     let system_header_path = Path::new("/usr/local/include/chdb.h");
 
-    if system_header_path.exists()
-        && (system_lib_path.join("libchdb.so").exists()
-            || system_lib_path.join("libchdb.dylib").exists())
-    {
-        return Some((
-            system_lib_path.to_path_buf(),
-            system_header_path.to_path_buf(),
-        ));
+    if system_header_path.exists() {
+        if let Some(lib_path) = find_lib_in(system_lib_path) {
+            return Some((lib_path, system_header_path.to_path_buf()));
+        }
     }
 
     None
@@ -109,13 +250,7 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
     fs::remove_file(&temp_archive)?;
 
     if cfg!(unix) {
-        let lib_path = if std::env::var("CARGO_FEATURE_STATIC").is_ok() {
-            out_dir.join("libchdb.a")
-        } else {
-            out_dir.join("libchdb.so")
-        };
-
-        if lib_path.exists() {
+        if let Some(lib_path) = find_lib_in(out_dir) {
             let _ = Command::new("chmod")
                 .args(["+x", lib_path.to_str().unwrap()])
                 .output();
@@ -133,9 +268,7 @@ fn target_platform() -> (String, String) {
 }
 
 fn get_platform_string() -> Result<String, &'static str> {
-    // Check if the static feature is enabled to decide which filename to download
-    let is_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
-    let ext = if is_static {
+    let ext = if is_static() {
         "-static.tar.gz"
     } else {
         ".tar.gz"
@@ -151,8 +284,11 @@ fn get_platform_string() -> Result<String, &'static str> {
     }
 }
 
-fn lib_exports_symbol(lib_dir: &Path, symbol: &str) -> bool {
-    let lib_path = lib_dir.join("libchdb.so");
+/// Whether the linked artifact exports `symbol`.
+///
+/// `nm -D` reads a dynamic symbol table, so this only ever answers yes for the
+/// dynamic library; a static archive and macOS have none to read.
+fn lib_exports_symbol(lib_path: &Path, symbol: &str) -> bool {
     if !lib_path.exists() {
         return false;
     }
@@ -174,14 +310,13 @@ fn header_declares_direct_insert(header_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn setup_link_paths(lib_dir: &Path, header_path: &Path) {
+fn setup_link_paths(lib_path: &Path, header_path: &Path) {
+    let lib_dir = lib_path.parent().unwrap_or(Path::new("."));
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-search=native=./");
     println!("cargo:rustc-link-search=native=/usr/local/lib");
 
-    let is_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
-
-    if is_static {
+    if is_static() {
         println!("cargo:rustc-link-lib=static=chdb");
         match target_platform().0.as_str() {
             "linux" => {
@@ -201,7 +336,7 @@ fn setup_link_paths(lib_dir: &Path, header_path: &Path) {
     }
 
     if header_declares_direct_insert(header_path)
-        && lib_exports_symbol(lib_dir, "chdb_insert_arrow_array")
+        && lib_exports_symbol(lib_path, "chdb_insert_arrow_array")
     {
         println!("cargo:rustc-cfg=direct_arrow_insert");
     }
@@ -209,12 +344,11 @@ fn setup_link_paths(lib_dir: &Path, header_path: &Path) {
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", header_path.display());
-    if lib_dir.join("libchdb.so").exists() {
-        println!(
-            "cargo:rerun-if-changed={}",
-            lib_dir.join("libchdb.so").display()
-        );
-    }
+    // The artifact that is actually linked, rather than a fixed libchdb.so. When
+    // building against a local chdb-core tree the engine is rebuilt underneath a
+    // build script that has no other reason to re-run, and without this line the
+    // tests keep exercising the previous engine while reporting on the new one.
+    println!("cargo:rerun-if-changed={}", lib_path.display());
 }
 
 fn generate_bindings(header_path: &Path, out_dir: &Path) {

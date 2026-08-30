@@ -62,6 +62,35 @@ If you prefer to install `libchdb` manually instead of automatic download:
 ./update_libchdb.sh --local
 ```
 
+### Building Against an Existing libchdb
+
+Two environment variables point the build at an engine this crate did not
+download — a local `chdb-core` build, a system package, a vendored copy:
+
+| Variable | Meaning |
+| --- | --- |
+| `CHDB_LIB_DIR` | directory holding the library to link |
+| `CHDB_INCLUDE_DIR` | directory holding the matching `chdb.h`, when it is not next to the library |
+
+Which file is looked for follows the linkage: `libchdb.a` with
+`--features static`, otherwise `libchdb.so` (which is the name `chdb-core` uses
+on macOS too) or `libchdb.dylib`.
+
+The two are separate because a `chdb-core` build tree does not keep them
+together — `build_static_lib.sh` leaves `libchdb.a` at the repository root while
+the header stays in `programs/local`:
+
+```bash
+CHDB_LIB_DIR=../chdb-core \
+CHDB_INCLUDE_DIR=../chdb-core/programs/local \
+    cargo build --features static
+```
+
+A directory that is set but has no usable library is an error rather than a
+fall-through to the download, so a build never quietly links a different engine
+than the one asked for. The build re-runs when the library file changes, which is
+what makes iterating against an engine that is still being rebuilt work.
+
 ## Testing
 
 Run the test suite:
