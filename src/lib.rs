@@ -27,6 +27,7 @@
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 //! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Thread-safe**: Connections and results can be safely sent between threads
+//! - **Version accessors** ([`version`]): which chdb-core release is linked, where it came from, and which ClickHouse it carries
 //!
 //! ## Examples
 //!
@@ -71,6 +72,7 @@ pub mod format;
 pub mod log_level;
 pub mod query_result;
 pub mod session;
+pub mod version;
 
 #[cfg(test)]
 mod test_utils;

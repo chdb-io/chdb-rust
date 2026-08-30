@@ -39,6 +39,14 @@ pub enum Error {
     /// The data contains invalid UTF-8 sequences.
     #[error("Non UTF-8 sequence: {0}")]
     NonUtf8Sequence(FromUtf8Error),
+    /// The linked library cannot report which chdb-core release it is.
+    ///
+    /// `chdb_version()` arrived in chdb-core v26.7.0; an older library does not
+    /// export it, so there is nothing to call. Deliberately not answered with
+    /// `SELECT version()`, which reports a ClickHouse version — a different
+    /// scheme, and so not a substitute.
+    #[error("the linked libchdb does not export chdb_version(); it predates chdb-core v26.7.0")]
+    EngineVersionUnavailable,
     /// A query execution error occurred.
     ///
     /// This contains the error message from the underlying chDB library,
