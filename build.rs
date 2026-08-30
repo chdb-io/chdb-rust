@@ -25,7 +25,7 @@ fn main() {
     match libchdb_info {
         Ok(engine) => {
             publish_engine_provenance(engine.version.as_deref(), &engine.source);
-            setup_link_paths(&engine.lib_path, &engine.header_path);
+            setup_link_paths(&engine.lib_path, &engine.header_path, &out_path);
             generate_bindings(&engine.header_path, &out_path);
         }
         Err(e) => {
@@ -372,13 +372,48 @@ fn header_declares(header_path: &Path, symbol: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn setup_link_paths(lib_path: &Path, header_path: &Path) {
+/// A directory holding nothing but the archive, so no dynamic library can be
+/// picked in its place.
+///
+/// `cargo:rustc-link-lib=static=chdb` reaches the linker as a plain `-lchdb`
+/// whenever the crate is compiled directly rather than consumed as an rlib —
+/// `cargo test --lib` is the case in this repository. Apple's linker then
+/// searches the `-L` directories and takes a `libchdb.so` found alongside the
+/// archive, which is how `--features static` produced a 1.5 MB binary with a
+/// dynamic dependency on libchdb: statically linked according to the feature
+/// flag, dynamically linked according to `otool -L`. Any directory that can hold
+/// both artifacts is ambiguous, and a chdb-core build tree holds both.
+///
+/// A symlink rather than a copy: the archive is around a gigabyte.
+fn isolate_archive(lib_path: &Path, out_dir: &Path) -> Option<PathBuf> {
+    let dir = out_dir.join("static-link");
+    fs::create_dir_all(&dir).ok()?;
+    let link = dir.join("libchdb.a");
+    let target = lib_path.canonicalize().ok()?;
+
+    if fs::read_link(&link).is_ok_and(|existing| existing == target) {
+        return Some(dir);
+    }
+    let _ = fs::remove_file(&link);
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &link).ok()?;
+    #[cfg(not(unix))]
+    fs::copy(&target, &link).ok()?;
+
+    Some(dir)
+}
+
+fn setup_link_paths(lib_path: &Path, header_path: &Path, out_dir: &Path) {
     let lib_dir = lib_path.parent().unwrap_or(Path::new("."));
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-search=native=./");
-    println!("cargo:rustc-link-search=native=/usr/local/lib");
 
     if is_static() {
+        // Only the isolated directory: ./ and /usr/local/lib are exactly the
+        // places a stray libchdb.so lives, and here they would shadow the
+        // archive rather than help find it.
+        let search_dir =
+            isolate_archive(lib_path, out_dir).unwrap_or_else(|| lib_dir.to_path_buf());
+        println!("cargo:rustc-link-search=native={}", search_dir.display());
         println!("cargo:rustc-link-lib=static=chdb");
         match target_platform().0.as_str() {
             "linux" => {
@@ -394,6 +429,9 @@ fn setup_link_paths(lib_path: &Path, header_path: &Path) {
             _ => {}
         }
     } else {
+        println!("cargo:rustc-link-search=native={}", lib_dir.display());
+        println!("cargo:rustc-link-search=native=./");
+        println!("cargo:rustc-link-search=native=/usr/local/lib");
         println!("cargo:rustc-link-lib=chdb");
     }
 
