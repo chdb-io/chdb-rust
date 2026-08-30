@@ -10,8 +10,12 @@ const CHDB_ENGINE_PIN: &str = "v26.7.0";
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
+    println!("cargo::rustc-check-cfg=cfg(has_chdb_version)");
 
     if env::var("DOCS_RS").is_ok() {
+        // docs.rs links no engine, but the version accessors still have to
+        // compile, and they read their provenance out of the environment.
+        publish_engine_provenance(None, "none: docs.rs build");
         return;
     }
 
@@ -19,9 +23,10 @@ fn main() {
     let out_path = PathBuf::from(&out_dir);
     let libchdb_info = find_libchdb_or_download(&out_path);
     match libchdb_info {
-        Ok((lib_path, header_path)) => {
-            setup_link_paths(&lib_path, &header_path);
-            generate_bindings(&header_path, &out_path);
+        Ok(engine) => {
+            publish_engine_provenance(engine.version.as_deref(), &engine.source);
+            setup_link_paths(&engine.lib_path, &engine.header_path);
+            generate_bindings(&engine.header_path, &out_path);
         }
         Err(e) => {
             eprintln!("Failed to find or download libchdb: {e}");
@@ -34,6 +39,35 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// The engine this build resolved, and how.
+struct Engine {
+    /// The artifact rustc is asked to link.
+    lib_path: PathBuf,
+    /// The header bindgen reads. It can come from `CHDB_INCLUDE_DIR` and so does
+    /// not necessarily sit next to `lib_path`.
+    header_path: PathBuf,
+    /// The chdb-core release, without the leading `v`, when this build fetched it
+    /// and therefore knows which one it is. `None` for a library the build was
+    /// handed rather than downloaded.
+    version: Option<String>,
+    /// Where the library came from, for `chdb_rust::version::ENGINE_SOURCE`.
+    source: String,
+}
+
+/// Hands the resolved provenance to the crate as two `env!`-readable values.
+///
+/// The expected version is deliberately empty rather than the pin whenever the
+/// build did not fetch the engine itself. A constant that reports the pin while
+/// the artifact came from somewhere else is worse than no constant at all: it
+/// reads as a fact about the linked library and is not one.
+fn publish_engine_provenance(version: Option<&str>, source: &str) {
+    println!(
+        "cargo:rustc-env=CHDB_EXPECTED_ENGINE_VERSION={}",
+        version.unwrap_or_default()
+    );
+    println!("cargo:rustc-env=CHDB_ENGINE_SOURCE={source}");
 }
 
 /// Whether the enabled features ask rustc to link the engine statically.
@@ -78,13 +112,11 @@ fn env_dir(var: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Resolves the engine to build against, as `(artifact, header)`.
+/// Resolves the engine to build against.
 ///
 /// In order: whatever `CHDB_LIB_DIR` / `CHDB_INCLUDE_DIR` name, then a copy
 /// already on the machine, then a download of the pinned engine.
-fn find_libchdb_or_download(
-    out_dir: &Path,
-) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+fn find_libchdb_or_download(out_dir: &Path) -> Result<Engine, Box<dyn std::error::Error>> {
     // Both are read here rather than inside the branches below, so the build
     // re-runs when either changes even on the paths that ignore them.
     println!("cargo:rerun-if-env-changed=CHDB_LIB_DIR");
@@ -96,11 +128,17 @@ fn find_libchdb_or_download(
     }
 
     if let Some((lib_path, header_path)) = find_existing_libchdb() {
-        return Ok((lib_path, header_override.unwrap_or(header_path)));
+        let source = format!("local: {}", lib_path.display());
+        return Ok(Engine {
+            lib_path,
+            header_path: header_override.unwrap_or(header_path),
+            version: None,
+            source,
+        });
     }
 
     println!("cargo:warning=libchdb not found locally, attempting to download...");
-    download_libchdb_to_out_dir(out_dir)?;
+    let version = download_libchdb_to_out_dir(out_dir)?;
 
     let lib_path = find_lib_in(out_dir).ok_or_else(|| {
         format!(
@@ -115,7 +153,14 @@ fn find_libchdb_or_download(
         return Err("Header file not found after download".into());
     }
 
-    Ok((lib_path, header_path))
+    Ok(Engine {
+        source: format!("download: chdb-core {version}"),
+        // The tag is the only place a `v` belongs. Everything downstream compares
+        // versions by plain string equality, which needs one spelling.
+        version: Some(version.trim_start_matches('v').to_string()),
+        lib_path,
+        header_path,
+    })
 }
 
 fn linkage_name() -> &'static str {
@@ -158,7 +203,7 @@ fn header_from_env() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
 fn libchdb_from_lib_dir(
     lib_dir: &Path,
     header_override: Option<PathBuf>,
-) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+) -> Result<Engine, Box<dyn std::error::Error>> {
     let lib_path = find_lib_in(lib_dir).ok_or_else(|| {
         format!(
             "CHDB_LIB_DIR is {} but it contains none of {:?}, which the {} linkage needs",
@@ -190,7 +235,12 @@ fn libchdb_from_lib_dir(
         lib_path.display(),
         header_path.display()
     );
-    Ok((lib_path, header_path))
+    Ok(Engine {
+        source: format!("CHDB_LIB_DIR: {}", lib_path.display()),
+        version: None,
+        lib_path,
+        header_path,
+    })
 }
 
 fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
@@ -213,17 +263,24 @@ fn find_existing_libchdb() -> Option<(PathBuf, PathBuf)> {
     None
 }
 
-fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let platform = get_platform_string()?;
-    // CHDB_ENGINE_VERSION overrides the pin, so a build can be pointed at one
-    // specific engine. Empty counts as unset, matching what `${VAR:-default}` in
-    // update_libchdb.sh does — otherwise an empty value here builds a URL with
-    // no version segment while the shell script quietly uses the pin.
+/// The chdb-core tag to download, `v` and all.
+///
+/// CHDB_ENGINE_VERSION overrides the pin, so a build can be pointed at one
+/// specific engine. Empty counts as unset, matching what `${VAR:-default}` in
+/// update_libchdb.sh does — otherwise an empty value here builds a URL with no
+/// version segment while the shell script quietly uses the pin.
+fn engine_tag_to_download() -> String {
     println!("cargo:rerun-if-env-changed=CHDB_ENGINE_VERSION");
-    let version = env::var("CHDB_ENGINE_VERSION")
+    env::var("CHDB_ENGINE_VERSION")
         .ok()
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| CHDB_ENGINE_PIN.to_string());
+        .unwrap_or_else(|| CHDB_ENGINE_PIN.to_string())
+}
+
+/// Downloads and unpacks the engine, returning the tag it fetched.
+fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let platform = get_platform_string()?;
+    let version = engine_tag_to_download();
     let url =
         format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
 
@@ -258,7 +315,7 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<(), Box<dyn std::error:
     }
 
     println!("cargo:warning=libchdb downloaded successfully to OUT_DIR");
-    Ok(())
+    Ok(version)
 }
 
 fn target_platform() -> (String, String) {
@@ -304,9 +361,14 @@ fn lib_exports_symbol(lib_path: &Path, symbol: &str) -> bool {
     }
 }
 
-fn header_declares_direct_insert(header_path: &Path) -> bool {
+/// Whether the header mentions `symbol`.
+///
+/// Coarse on purpose: what matters is whether bindgen will have produced a
+/// declaration to call, and a header that names the symbol at all is a header
+/// bindgen saw it in.
+fn header_declares(header_path: &Path, symbol: &str) -> bool {
     fs::read_to_string(header_path)
-        .map(|s| s.contains("chdb_insert_arrow_array"))
+        .map(|contents| contents.contains(symbol))
         .unwrap_or(false)
 }
 
@@ -335,10 +397,17 @@ fn setup_link_paths(lib_path: &Path, header_path: &Path) {
         println!("cargo:rustc-link-lib=chdb");
     }
 
-    if header_declares_direct_insert(header_path)
+    if header_declares(header_path, "chdb_insert_arrow_array")
         && lib_exports_symbol(lib_path, "chdb_insert_arrow_array")
     {
         println!("cargo:rustc-cfg=direct_arrow_insert");
+    }
+
+    // chdb_version() arrived in chdb-core v26.7.0. Older engines have no way to
+    // report their own release, and calling a symbol they do not export would
+    // not link, so the accessor is compiled out instead.
+    if header_declares(header_path, "chdb_version") {
+        println!("cargo:rustc-cfg=has_chdb_version");
     }
 
     println!("cargo:rerun-if-changed=wrapper.h");
