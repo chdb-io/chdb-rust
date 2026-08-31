@@ -137,20 +137,20 @@ fn find_libchdb_or_download(out_dir: &Path) -> Result<Engine, Box<dyn std::error
         });
     }
 
-    println!("cargo:warning=libchdb not found locally, attempting to download...");
-    let version = download_libchdb_to_out_dir(out_dir)?;
+    println!("cargo:warning=libchdb not found locally, fetching it");
+    let (engine_dir, version) = fetch_engine(out_dir)?;
 
-    let lib_path = find_lib_in(out_dir).ok_or_else(|| {
+    let lib_path = find_lib_in(&engine_dir).ok_or_else(|| {
         format!(
-            "the downloaded archive contains none of {:?}, which the {} linkage needs",
+            "the archive contains none of {:?}, which the {} linkage needs",
             lib_file_names(),
             linkage_name()
         )
     })?;
-    let header_path = header_override.unwrap_or_else(|| out_dir.join("chdb.h"));
+    let header_path = header_override.unwrap_or_else(|| engine_dir.join("chdb.h"));
 
     if !header_path.exists() {
-        return Err("Header file not found after download".into());
+        return Err(format!("no chdb.h in {}", engine_dir.display()).into());
     }
 
     Ok(Engine {
@@ -277,12 +277,133 @@ fn engine_tag_to_download() -> String {
         .unwrap_or_else(|| CHDB_ENGINE_PIN.to_string())
 }
 
-/// Downloads and unpacks the engine, returning the tag it fetched.
-fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let platform = get_platform_string()?;
-    let version = engine_tag_to_download();
-    let url =
-        format!("https://github.com/chdb-io/chdb-core/releases/download/{version}/{platform}");
+/// Written last inside a cache entry, so an entry is complete or absent and
+/// never half-unpacked.
+const CACHE_STAMP: &str = ".chdb-engine-complete";
+
+/// Where fetched engines are kept, outside `target/`.
+///
+/// An engine depends on the release tag and the platform and changes rarely, but
+/// `OUT_DIR` is handed out per profile and per feature combination: switch
+/// profile or enable one more feature and it is fetched again, and `cargo clean`
+/// discards every copy. Measured in this repository before the cache existed:
+/// 4.9 GB under target/, seven copies of the same two engines.
+///
+/// `CHDB_ENGINE_CACHE_DIR` moves it. Deleting the directory clears it — nothing
+/// here evicts, because an entry is only ever added under a key it does not
+/// already have.
+fn engine_cache_root() -> Option<PathBuf> {
+    println!("cargo:rerun-if-env-changed=CHDB_ENGINE_CACHE_DIR");
+    if let Some(dir) = env_dir("CHDB_ENGINE_CACHE_DIR") {
+        return Some(dir);
+    }
+
+    // Two paths are not worth a build dependency: build dependencies are
+    // compiled before anything else in the graph.
+    let home = env_dir("HOME")?;
+    Some(if cfg!(target_os = "macos") {
+        home.join("Library/Caches/chdb-rust")
+    } else {
+        env_dir("XDG_CACHE_HOME")
+            .unwrap_or_else(|| home.join(".cache"))
+            .join("chdb-rust")
+    })
+}
+
+/// The unpacked engine directory, plus the tag it holds.
+///
+/// The shared cache when one is usable, `OUT_DIR` when it is not: an unwritable
+/// cache directory should cost a build time, not break it.
+fn fetch_engine(out_dir: &Path) -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
+    let tag = engine_tag_to_download();
+    let asset = get_platform_string()?;
+
+    if let Some(root) = engine_cache_root() {
+        match cached_engine(&tag, &asset, &root) {
+            Ok(dir) => return Ok((dir, tag)),
+            Err(e) => {
+                println!("cargo:warning=engine cache at {} unusable ({e}); unpacking into OUT_DIR instead", root.display());
+            }
+        }
+    }
+
+    download_and_unpack(&tag, &asset, out_dir)?;
+    Ok((out_dir.to_path_buf(), tag))
+}
+
+/// The cache entry for this tag and asset, filling it if it is not there.
+///
+/// The key is the release tag and the asset name, which together are the version,
+/// the platform and the linkage — everything the downloaded bytes depend on.
+///
+/// Filling goes through a sibling directory and one rename, so an interrupted
+/// build leaves nothing a later build can mistake for an engine. A concurrent
+/// build that gets there first wins: its copy came from the same URL.
+fn cached_engine(
+    tag: &str,
+    asset: &str,
+    cache_root: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let key = asset.trim_end_matches(".tar.gz");
+    let entry = cache_root.join(tag).join(key);
+
+    if entry.join(CACHE_STAMP).exists() {
+        println!(
+            "cargo:warning=using the cached engine at {}",
+            entry.display()
+        );
+        return Ok(entry);
+    }
+
+    let parent = cache_root.join(tag);
+    let staging = parent.join(format!("{key}.incomplete.{}", std::process::id()));
+    fs::create_dir_all(&parent)?;
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging)?;
+
+    if let Err(e) = fill_cache_entry(tag, asset, &staging) {
+        // A failed fetch of a few hundred megabytes should not leave a few
+        // hundred megabytes behind. The next build would not mistake it for an
+        // engine — there is no stamp in it — but it would never clean it up
+        // either.
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir(&parent);
+        return Err(e);
+    }
+
+    match fs::rename(&staging, &entry) {
+        Ok(()) => {}
+        Err(_) if entry.join(CACHE_STAMP).exists() => {
+            let _ = fs::remove_dir_all(&staging);
+        }
+        Err(e) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e.into());
+        }
+    }
+
+    println!("cargo:warning=cached the engine at {}", entry.display());
+    Ok(entry)
+}
+
+/// Unpacks the engine into a staging directory and stamps it complete.
+fn fill_cache_entry(
+    tag: &str,
+    asset: &str,
+    staging: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    download_and_unpack(tag, asset, staging)?;
+    fs::write(staging.join(CACHE_STAMP), tag)?;
+    Ok(())
+}
+
+/// Downloads `asset` from release `tag` and unpacks it into `dest`.
+fn download_and_unpack(
+    tag: &str,
+    asset: &str,
+    dest: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let url = format!("https://github.com/chdb-io/chdb-core/releases/download/{tag}/{asset}");
 
     println!("cargo:warning=Downloading libchdb from: {url}");
 
@@ -296,26 +417,25 @@ fn download_libchdb_to_out_dir(out_dir: &Path) -> Result<String, Box<dyn std::er
         return Err(format!("Download failed with status: {}", response.status()).into());
     }
 
-    let temp_archive = out_dir.join("libchdb.tar.gz");
-    let mut dest = fs::File::create(&temp_archive)?;
-    response.copy_to(&mut dest)?;
+    let temp_archive = dest.join("libchdb.tar.gz");
+    let mut archive_file = fs::File::create(&temp_archive)?;
+    response.copy_to(&mut archive_file)?;
 
     println!("cargo:warning=Unpacking libchdb...");
     let file = fs::File::open(&temp_archive)?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    archive.unpack(out_dir)?;
+    archive.unpack(dest)?;
     fs::remove_file(&temp_archive)?;
 
     if cfg!(unix) {
-        if let Some(lib_path) = find_lib_in(out_dir) {
+        if let Some(lib_path) = find_lib_in(dest) {
             let _ = Command::new("chmod")
                 .args(["+x", lib_path.to_str().unwrap()])
                 .output();
         }
     }
 
-    println!("cargo:warning=libchdb downloaded successfully to OUT_DIR");
-    Ok(version)
+    Ok(())
 }
 
 fn target_platform() -> (String, String) {
