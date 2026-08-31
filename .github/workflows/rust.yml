@@ -108,12 +108,19 @@ jobs:
     # The files that were just checked, run directly. `cargo test` would be
     # equivalent for as long as nothing relinks in between; running the list
     # removes the "for as long as".
+    #
+    # The list is read on fd 3 and each binary gets /dev/null for stdin, and both
+    # halves matter. A `while read ... done < file` loop hands the child whatever
+    # is left of the file, and chdb reads a non-empty stdin as external query
+    # data, so a query carrying inlined data is then rejected with "Processing
+    # async inserts with both inlined and external data". That failed exactly the
+    # binaries that were not last in the list, which is as confusing as it sounds.
     - name: Run tests
       run: |
-        while read -r binary; do
+        while read -r binary <&3; do
           echo "== $binary"
-          "$binary" --test-threads=1
-        done < test-binaries.txt
+          "$binary" --test-threads=1 < /dev/null
+        done 3< test-binaries.txt
       env:
         RUST_BACKTRACE: full
 
