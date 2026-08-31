@@ -29,7 +29,9 @@
 //! `--test-threads=1` by CI.
 
 use std::fmt::Write as _;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -516,25 +518,51 @@ fn run_all() {
 /// Runs one case in a child process and checks its exit status, its stdout and
 /// its wall-clock time.
 fn run_child(exe: &Path, case: &Case) -> Result<Duration, String> {
-    let stdout_path = std::env::temp_dir().join(format!(
-        "chdb-runtime-{}-{}.out",
-        std::process::id(),
-        case.name
-    ));
-    let stdout_file =
-        std::fs::File::create(&stdout_path).map_err(|e| format!("cannot capture stdout: {e}"))?;
-
-    // stdout to a file rather than a pipe, so a case that writes more than a
-    // pipe holds cannot deadlock against a parent that is not reading it yet.
-    // stderr is inherited: the diagnostics are there, and swallowing them is
-    // how a failure here becomes unexplainable.
-    let mut child = Command::new(exe)
+    // stdout through a pipe drained by its own thread. A case that writes more
+    // than the pipe holds cannot block against a parent that is not reading it
+    // yet, and nothing here depends on a writable temp directory. stderr is
+    // inherited: the diagnostics are there, and swallowing them is how a failure
+    // becomes unexplainable.
+    let mut command = Command::new(exe);
+    command
         .env(CASE_ENV, case.name)
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("cannot spawn: {e}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    // Force the standard library onto its fork/exec path.
+    //
+    // A statically linked artifact resolves posix_spawn and the whole
+    // posix_spawn_file_actions_* family against the engine's archive, which
+    // carries ClickHouse's glibc-compatibility shims. That posix_spawn
+    // deliberately ignores file actions - its own source says so: "callers are
+    // compiled against glibc's <spawn.h> ... walking it as `struct fdop` would
+    // dereference garbage. Posix_spawn callers that need file actions must avoid
+    // this stub or fall back to fork+exec". The standard library records a dup2
+    // action and calls it anyway, so the redirection is dropped without an
+    // error and the child writes to whatever stdout this process had. Measured
+    // on linux/aarch64 against libchdb.a v26.7.0: the case output appeared on
+    // the parent's stdout and the capture came back empty.
+    //
+    // A pre_exec closure is what makes the standard library skip the posix_spawn
+    // fast path. The fork/exec path calls dup2 directly, and that symbol the
+    // archive does not define.
+    //
+    // SAFETY: the closure allocates nothing, takes no locks and only returns
+    // Ok, which is all that is allowed between fork and exec.
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| Ok(()));
+    }
+
+    let mut child = command.spawn().map_err(|e| format!("cannot spawn: {e}"))?;
+
+    let mut pipe = child.stdout.take().ok_or("stdout was not piped")?;
+    let reader = std::thread::spawn(move || {
+        let mut captured = Vec::new();
+        let _ = pipe.read_to_end(&mut captured);
+        captured
+    });
 
     let started = Instant::now();
     let status = loop {
@@ -557,9 +585,12 @@ fn run_child(exe: &Path, case: &Case) -> Result<Duration, String> {
     };
     let elapsed = started.elapsed();
 
-    let actual = std::fs::read_to_string(&stdout_path)
-        .map_err(|e| format!("cannot read captured stdout: {e}"))?;
-    let _ = std::fs::remove_file(&stdout_path);
+    // The child is gone, so the write end of the pipe is closed and the reader
+    // has seen EOF.
+    let captured = reader.join().map_err(|_| "the capture thread panicked")?;
+    // Lossy rather than an error: output mangled into invalid UTF-8 is one of
+    // the symptoms, and showing it beats refusing to compare it.
+    let actual = String::from_utf8_lossy(&captured);
 
     // Exit status first: a correct answer from a process that then died is not a
     // pass, and it is the shape process-exit faults take.
