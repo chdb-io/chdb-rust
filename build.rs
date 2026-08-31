@@ -85,13 +85,21 @@ fn is_static() -> bool {
 /// The names the linked artifact can have, in preference order.
 ///
 /// chdb-core ships the dynamic library as `libchdb.so` on macOS as well, so that
-/// name comes first on every platform; `.dylib` is accepted because a locally
-/// built or renamed copy is a reasonable thing to point `CHDB_LIB_DIR` at.
+/// name comes first there too; `.dylib` is accepted only on macOS, because a
+/// locally built or renamed copy is a reasonable thing to point `CHDB_LIB_DIR`
+/// at and Apple's linker will find it. Elsewhere `-lchdb` reaches a linker that
+/// does not search that name, so accepting it would turn "no engine here" into a
+/// missing-library link error further along.
+///
+/// Keyed on the target rather than the host: which linker sees `-lchdb` is a
+/// property of what is being built, not of what is building it.
 fn lib_file_names() -> &'static [&'static str] {
     if is_static() {
         &["libchdb.a"]
-    } else {
+    } else if target_platform().0 == "macos" {
         &["libchdb.so", "libchdb.dylib"]
+    } else {
+        &["libchdb.so"]
     }
 }
 
@@ -105,9 +113,13 @@ fn find_lib_in(dir: &Path) -> Option<PathBuf> {
 
 /// A directory named by an environment variable. Empty counts as unset, matching
 /// how `${VAR:-default}` behaves in update_libchdb.sh.
+///
+/// `var_os` rather than `var`: a path is bytes and need not be UTF-8, and
+/// `env::var` reports a non-UTF-8 value as an error, which would read here as
+/// "unset" — the build would then quietly resolve some other engine than the one
+/// it was pointed at, which is the outcome this hatch exists to rule out.
 fn env_dir(var: &str) -> Option<PathBuf> {
-    env::var(var)
-        .ok()
+    env::var_os(var)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
@@ -463,8 +475,11 @@ fn get_platform_string() -> Result<String, &'static str> {
 
 /// Whether the linked artifact exports `symbol`.
 ///
-/// `nm -D` reads a dynamic symbol table, so this only ever answers yes for the
-/// dynamic library; a static archive and macOS have none to read.
+/// `nm -D` asks for an ELF dynamic symbol table: it answers only for a dynamic
+/// library on a platform that has one. Measured on macOS, Apple's nm rejects the
+/// flag outright for both `libchdb.so` and `libchdb.a`, so this is false there
+/// whatever the artifact contains. Only `direct_arrow_insert` consults it, and
+/// that cfg is gated first on a header declaration no released header carries.
 fn lib_exports_symbol(lib_path: &Path, symbol: &str) -> bool {
     if !lib_path.exists() {
         return false;
