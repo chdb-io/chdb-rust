@@ -53,6 +53,13 @@ required-features = ["arrow"]
 name = "arrow_stream_roundtrip"
 required-features = ["arrow"]
 
+# Its own runner: each case has to be its own process so that the exit code, the
+# exact stdout and a per-case wall-clock limit can all be checked, none of which
+# libtest exposes.
+[[test]]
+name = "runtime_faces"
+harness = false
+
 [package.metadata.chdb]
 # The chdb-core release this crate builds against. This is a chdb-core release
 # number, not a ClickHouse one: X.Y is the ClickHouse minor line the release sits
