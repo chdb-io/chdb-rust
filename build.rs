@@ -15,7 +15,7 @@ fn main() {
     if env::var("DOCS_RS").is_ok() {
         // docs.rs links no engine, but the version accessors still have to
         // compile, and they read their provenance out of the environment.
-        publish_engine_provenance(None, "none: docs.rs build");
+        publish_engine_provenance(None, "none: docs.rs build", Path::new(""));
         return;
     }
 
@@ -26,7 +26,7 @@ fn main() {
     let libchdb_info = find_libchdb_or_download(&out_path);
     match libchdb_info {
         Ok(engine) => {
-            publish_engine_provenance(engine.version.as_deref(), &engine.source);
+            publish_engine_provenance(engine.version.as_deref(), &engine.source, &engine.lib_path);
             setup_link_paths(&engine.lib_path, &engine.header_path, &out_path);
             generate_bindings(&engine.header_path, &out_path);
         }
@@ -64,12 +64,18 @@ struct Engine {
 /// build did not fetch the engine itself. A constant that reports the pin while
 /// the artifact came from somewhere else is worse than no constant at all: it
 /// reads as a fact about the linked library and is not one.
-fn publish_engine_provenance(version: Option<&str>, source: &str) {
+fn publish_engine_provenance(version: Option<&str>, source: &str, lib_path: &Path) {
     println!(
         "cargo:rustc-env=CHDB_EXPECTED_ENGINE_VERSION={}",
         version.unwrap_or_default()
     );
     println!("cargo:rustc-env=CHDB_ENGINE_SOURCE={source}");
+    // The artifact itself, so a test can inspect what was linked rather than
+    // guess where it came from.
+    println!(
+        "cargo:rustc-env=CHDB_LINKED_ARTIFACT={}",
+        lib_path.display()
+    );
 }
 
 /// Below this the linker emits no chained fixups, and a run proves nothing.
