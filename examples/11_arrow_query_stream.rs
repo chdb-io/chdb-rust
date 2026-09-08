@@ -1,6 +1,6 @@
 //! Example: streaming Arrow record batches via the C Data Interface
 //!
-//! Unlike example 09, which streams Arrow IPC bytes through [`QueryStream`],
+//! Unlike example 10, which streams Arrow IPC bytes through [`QueryStream`],
 //! this example uses [`Session::execute_stream_arrow`] to pull typed
 //! [`arrow::record_batch::RecordBatch`] values directly from chDB with no
 //! IPC serialization.

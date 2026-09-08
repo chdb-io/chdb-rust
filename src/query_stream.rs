@@ -3,7 +3,8 @@
 //! This module provides the [`QueryStream`] type for reading large query results
 //! in chunks without materializing the entire output in memory.
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
+use std::mem::ManuallyDrop;
 
 use crate::bindings;
 use crate::connection::Connection;
@@ -95,7 +96,13 @@ impl<'a> QueryStream<'a> {
             return Err(Error::NoResult);
         }
 
-        Self::check_stream_error(stream_ptr)?;
+        let probe = ManuallyDrop::new(QueryResult::new(stream_ptr));
+        if let Err(e) = probe.check_error_ref() {
+            drop(ManuallyDrop::into_inner(probe));
+            return Err(e);
+        }
+        std::mem::forget(ManuallyDrop::into_inner(probe));
+
         Ok(stream_ptr)
     }
 
@@ -104,20 +111,6 @@ impl<'a> QueryStream<'a> {
             QueryStreamConnection::Borrowed(conn) => conn.handle(),
             QueryStreamConnection::Owned(conn) => conn.handle(),
         }
-    }
-
-    fn check_stream_error(stream: *mut bindings::chdb_result) -> Result<()> {
-        let err_ptr = unsafe { bindings::chdb_result_error(stream) };
-        if err_ptr.is_null() {
-            return Ok(());
-        }
-
-        let err_msg = unsafe { CStr::from_ptr(err_ptr).to_string_lossy().to_string() };
-        if err_msg.is_empty() {
-            return Ok(());
-        }
-
-        Err(Error::QueryError(err_msg))
     }
 
     /// Fetch the next chunk of query results.
@@ -163,12 +156,16 @@ impl<'a> QueryStream<'a> {
             unsafe { bindings::chdb_stream_fetch_result(self.conn_handle(), self.stream) };
 
         if chunk_ptr.is_null() {
+            self.finished = true;
             return Err(Error::NoResult);
         }
 
         let chunk = QueryResult::new(chunk_ptr);
 
-        chunk.check_error_ref()?;
+        if let Err(e) = chunk.check_error_ref() {
+            self.finished = true;
+            return Err(e);
+        }
 
         if chunk.rows_read() == 0 {
             drop(chunk);
@@ -193,7 +190,9 @@ impl<'a> QueryStream<'a> {
 
         let conn = self.conn_handle();
         unsafe {
-            bindings::chdb_stream_cancel_query(conn, self.stream);
+            if !self.finished {
+                bindings::chdb_stream_cancel_query(conn, self.stream);
+            }
             bindings::chdb_destroy_query_result(self.stream);
         }
         self.stream = std::ptr::null_mut();
@@ -347,6 +346,25 @@ mod tests {
 
         let chunks: Vec<_> = stream.collect::<Result<Vec<_>>>()?;
         assert!(!chunks.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_query_stream_error_then_retry_returns_none() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        let mut stream =
+            conn.query_stream("SELECT * FROM nonexistent_table", OutputFormat::JSONEachRow)?;
+
+        assert!(stream.next_chunk().is_err());
+        assert!(stream.next_chunk()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_query_stream_syntax_error_fails_at_start() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        let result = conn.query_stream("SELECT invalid syntax here", OutputFormat::JSONEachRow);
+        assert!(result.is_err());
         Ok(())
     }
 

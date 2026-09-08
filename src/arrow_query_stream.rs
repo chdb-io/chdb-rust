@@ -84,9 +84,10 @@ impl<'a> ArrowQueryStream<'a> {
 
         let probe = ManuallyDrop::new(QueryResult::new(stream_ptr));
         if let Err(e) = probe.check_error_ref() {
-            let _ = ManuallyDrop::into_inner(probe);
+            drop(ManuallyDrop::into_inner(probe));
             return Err(e);
         }
+        std::mem::forget(ManuallyDrop::into_inner(probe));
 
         Ok(stream_ptr)
     }
@@ -125,8 +126,13 @@ impl<'a> ArrowQueryStream<'a> {
             return Err(Error::QueryError(detail));
         }
 
-        let mut reader = ArrowArrayStreamReader::try_new(ffi_stream)
-            .map_err(|e| Error::QueryError(e.to_string()))?;
+        let mut reader = match ArrowArrayStreamReader::try_new(ffi_stream) {
+            Ok(reader) => reader,
+            Err(e) => {
+                self.finished = true;
+                return Err(Error::QueryError(e.to_string()));
+            }
+        };
 
         match reader.next() {
             Some(Ok(batch)) => Ok(Some(batch)),
@@ -249,6 +255,24 @@ mod tests {
         let batches: Vec<_> = stream.collect::<Result<Vec<_>>>()?;
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 5);
+        Ok(())
+    }
+
+    #[test]
+    fn test_arrow_query_stream_error_then_retry_returns_none() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        let mut stream = conn.query_stream_arrow("SELECT * FROM nonexistent_table")?;
+
+        assert!(stream.next_batch().is_err());
+        assert!(stream.next_batch()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_arrow_query_stream_syntax_error_fails_at_start() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        let result = conn.query_stream_arrow("SELECT invalid syntax here");
+        assert!(result.is_err());
         Ok(())
     }
 
