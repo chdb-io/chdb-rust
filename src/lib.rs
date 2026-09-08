@@ -25,7 +25,9 @@
 //! - **Stateless queries**: Execute one-off queries without persistent storage
 //! - **Stateful sessions**: Create databases and tables with persistent storage
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
+//! - **Query result streaming**: Read large result sets in chunks with constant memory
 //! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
+//! - **Arrow batch streaming** (with the `arrow` feature): Stream query results as `RecordBatch` values via the Arrow C Data Interface
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //! - **Version accessors** ([`version`]): which chdb-core release is linked, where it came from, and which ClickHouse it carries
 //!
@@ -43,6 +45,8 @@ pub mod arg;
 pub mod arrow_insert;
 #[cfg(feature = "arrow")]
 pub mod arrow_options;
+#[cfg(feature = "arrow")]
+pub mod arrow_query_stream;
 #[cfg(feature = "arrow")]
 pub mod arrow_stream;
 #[cfg(feature = "arrow")]
@@ -71,6 +75,7 @@ pub mod error;
 pub mod format;
 pub mod log_level;
 pub mod query_result;
+pub mod query_stream;
 pub mod session;
 pub mod version;
 
@@ -78,10 +83,13 @@ pub mod version;
 mod test_utils;
 
 use crate::arg::{extract_output_format, Arg};
+#[cfg(feature = "arrow")]
+use crate::arrow_query_stream::ArrowQueryStream;
 use crate::connection::Connection;
 use crate::error::Result;
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::query_stream::QueryStream;
 
 pub(crate) const CHDB_PROGRAM_NAME: &str = "clickhouse";
 
@@ -130,4 +138,76 @@ pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
     let conn = Connection::open_in_memory()?;
     let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
     conn.query(query, fmt)
+}
+
+/// Execute a one-off streaming query using an in-memory connection.
+///
+/// This function creates a temporary in-memory database connection, starts a
+/// streaming query, and returns a [`QueryStream`] that owns the connection.
+/// The connection is kept alive until the stream is dropped.
+///
+/// Primarily useful for reading external data: CSV files, S3, Parquet, etc.
+///
+/// # Arguments
+///
+/// * `query` - The SQL query string to execute
+/// * `query_args` - Optional array of query arguments (e.g., output format)
+///
+/// # Returns
+///
+/// Returns a [`QueryStream`] that owns the temporary connection, or an
+/// [`Error`](error::Error) if the query cannot be started.
+///
+/// # Examples
+///
+/// ```no_run
+/// use chdb_rust::execute_stream;
+/// use chdb_rust::arg::Arg;
+/// use chdb_rust::format::OutputFormat;
+///
+/// let mut stream = execute_stream(
+///     "SELECT number FROM numbers(100_000)",
+///     Some(&[Arg::OutputFormat(OutputFormat::JSONEachRow)]),
+/// )?;
+///
+/// while let Some(chunk) = stream.next_chunk()? {
+///     print!("{}", chunk.data_utf8_lossy());
+/// }
+/// # Ok::<(), chdb_rust::error::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The query syntax is invalid
+/// - The connection cannot be established
+/// - The query execution fails
+pub fn execute_stream(query: &str, query_args: Option<&[Arg]>) -> Result<QueryStream<'static>> {
+    let conn = Connection::open_in_memory()?;
+    let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
+    QueryStream::start_owned(conn, query, fmt)
+}
+
+/// Execute a one-off Arrow streaming query using an in-memory connection.
+///
+/// Returns an [`ArrowQueryStream`] that owns the temporary connection and yields
+/// [`arrow::record_batch::RecordBatch`] values via the Arrow C Data Interface.
+///
+/// Available when the crate is built with the `arrow` feature.
+///
+/// # Examples
+///
+/// ```no_run
+/// use chdb_rust::execute_stream_arrow;
+///
+/// let mut stream = execute_stream_arrow("SELECT number FROM numbers(100_000)")?;
+/// while let Some(batch) = stream.next_batch()? {
+///     println!("rows: {}", batch.num_rows());
+/// }
+/// # Ok::<(), chdb_rust::error::Error>(())
+/// ```
+#[cfg(feature = "arrow")]
+pub fn execute_stream_arrow(query: &str) -> Result<ArrowQueryStream<'static>> {
+    let conn = Connection::open_in_memory()?;
+    ArrowQueryStream::start_owned(conn, query)
 }

@@ -16,7 +16,7 @@ thiserror = "1"
 
 [features]
 default = ["arrow"]
-# Apache Arrow bulk insert / stream registration (RecordBatch, FFI wrappers).
+# Apache Arrow bulk insert / stream registration / query streaming (RecordBatch, FFI wrappers).
 arrow = ["dep:arrow"]
 # By default, we link dynamically.
 # Users can opt-in to static linking with --features static
@@ -29,12 +29,23 @@ flate2 = "1.0"
 tar = "0.4"
 
 [dev-dependencies]
-arrow = { version = "59", features = ["ffi"] }
+arrow = { version = "59", features = ["ffi", "prettyprint", "ipc_compression"] }
 tempdir = "0.3.7"
 tempfile = "3"
 
 [[example]]
 name = "08_arrow_insert"
+required-features = ["arrow"]
+
+[[example]]
+name = "09_query_streaming"
+
+[[example]]
+name = "10_query_streaming_arrow"
+required-features = ["arrow"]
+
+[[example]]
+name = "11_arrow_query_stream"
 required-features = ["arrow"]
 
 [[test]]
