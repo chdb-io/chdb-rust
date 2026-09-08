@@ -24,20 +24,28 @@ jobs:
     # it and reports test results for it, which is exactly the misleading outcome
     # the check exists to prevent.
     needs: engine_pin
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v3
-    - name: Fetch library
-      run: |
-          bash update_libchdb.sh --local
-          sudo mv libchdb.so /usr/lib/libchdb.so
-          sudo ldconfig
+    - uses: actions/checkout@v4
+    # --global rather than moving the library into /usr/lib by hand: it installs
+    # into /usr/local, which is on the default search path of both loaders, and
+    # skips ldconfig where there is none. One command for every platform here,
+    # and the same one the README gives users.
+    - name: Install the engine
+      run: ./update_libchdb.sh --global
+    # Once rather than once per platform: neither depends on the target.
     - name: Check formatting
+      if: matrix.os == 'ubuntu-latest'
       run: cargo fmt --check
     # Default features only. --all-features enables `static`, which downloads a
     # few hundred megabytes of archive that clippy then does not link; that
     # belongs in the job that links it.
     - name: Check clippy
+      if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets -- --deny warnings
     - name: Build
       run: cargo build --verbose
@@ -73,13 +81,18 @@ jobs:
   static:
     needs: engine_pin
     strategy:
-      # One platform failing should not hide the other's result: the two link
-      # with different linkers and only one of them has ever had this problem.
+      # The four platforms this crate claims to support. One failing should not
+      # hide the others: the two operating systems link with different linkers,
+      # only one of them has ever had this problem, and the two architectures
+      # get separately built archives.
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
           - os: macos-latest
+            test_min_macos: "12.0"
+          - os: macos-15-intel
             test_min_macos: "12.0"
     runs-on: ${{ matrix.os }}
     env:
