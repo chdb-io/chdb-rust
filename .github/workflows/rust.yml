@@ -102,11 +102,22 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # One cell, like the other lints: what clippy reports does not vary by
+    # architecture, and this is the step that materialises a second copy of the
+    # engine as a static rlib. Leaving it on every cell cost the arm64 runner
+    # its disk, and the runner service dies with it - "the runner has received a
+    # shutdown signal", exit 143, at the same point in the next step every time.
     - name: Check clippy with every feature
+      if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets --all-features -- --deny warnings
 
     - name: Build the tests
       run: |
+        # Printed because the way this job fails when it runs out is as a dead
+        # runner rather than as a build error: nine test binaries of a few
+        # hundred megabytes each, plus the unpacked archive and the rlib that
+        # carries a copy of it.
+        df -h /
         cargo test --features static --no-run --message-format=json > artifacts.json
         jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null)
                | .executable' artifacts.json > test-binaries.txt
