@@ -14,12 +14,17 @@
 # Two checks per binary:
 #
 #   1. no dynamic dependency on libchdb
-#   2. the C API is defined inside the binary
+#   2. the C API is not imported - it is either defined here or not referenced
 #
 # The first can pass on its own for a binary that finds libchdb through a
 # mechanism the check does not read, such as a dlopen. The second can pass on
 # its own for a binary that also carries a dynamic reference. Together they say
 # the engine is in this file and is not being loaded from anywhere else.
+#
+# "Not imported" rather than "defined here", because a test that never calls the
+# engine is legitimately linked without it: the linker drops what nothing
+# references. What must never happen is an undefined reference, which is exactly
+# how the engine would be arriving dynamically.
 #
 # Usage: check-static-link.sh <binary>...
 
@@ -68,12 +73,15 @@ for bin in "$@"; do
 		echo "   ok: no dynamic libchdb dependency"
 	fi
 
-	if nm "$bin" 2>/dev/null | grep -Eq "[[:space:]][Tt][[:space:]]_?${symbol}\$"; then
+	symbols=$(nm "$bin" 2>/dev/null | grep -E "[[:space:]]_?${symbol}\$" || true)
+	if printf '%s\n' "$symbols" | grep -Eq "[[:space:]]U[[:space:]]_?${symbol}\$"; then
+		echo "   FAIL: ${symbol} is imported, so the engine is arriving from elsewhere"
+		printf '%s\n' "$symbols" | sed 's/^/     /'
+		failed=1
+	elif printf '%s\n' "$symbols" | grep -Eq "[[:space:]][Tt][[:space:]]_?${symbol}\$"; then
 		echo "   ok: ${symbol} is defined here"
 	else
-		echo "   FAIL: ${symbol} is not defined here, so the engine is elsewhere"
-		nm "$bin" 2>/dev/null | grep -E "[[:space:]]_?${symbol}\$" | sed 's/^/     /' || true
-		failed=1
+		echo "   ok: ${symbol} is not referenced, so nothing was linked for it"
 	fi
 
 	echo "   size: $(wc -c <"$bin" | tr -d ' ') bytes"

@@ -6,7 +6,7 @@ use std::process::Command;
 /// The engine this crate is developed against, used when no libchdb is already
 /// present. Keep it on its own line and in step with CHDB_ENGINE_PIN in
 /// update_libchdb.sh: the release check greps for both when it proposes a bump.
-const CHDB_ENGINE_PIN: &str = "v26.7.0";
+const CHDB_ENGINE_PIN: &str = "v26.7.2-rc.2";
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
@@ -15,16 +15,18 @@ fn main() {
     if env::var("DOCS_RS").is_ok() {
         // docs.rs links no engine, but the version accessors still have to
         // compile, and they read their provenance out of the environment.
-        publish_engine_provenance(None, "none: docs.rs build");
+        publish_engine_provenance(None, "none: docs.rs build", Path::new(""));
         return;
     }
+
+    emit_test_macos_floor();
 
     let out_dir = env::var("OUT_DIR").unwrap();
     let out_path = PathBuf::from(&out_dir);
     let libchdb_info = find_libchdb_or_download(&out_path);
     match libchdb_info {
         Ok(engine) => {
-            publish_engine_provenance(engine.version.as_deref(), &engine.source);
+            publish_engine_provenance(engine.version.as_deref(), &engine.source, &engine.lib_path);
             setup_link_paths(&engine.lib_path, &engine.header_path, &out_path);
             generate_bindings(&engine.header_path, &out_path);
         }
@@ -62,12 +64,85 @@ struct Engine {
 /// build did not fetch the engine itself. A constant that reports the pin while
 /// the artifact came from somewhere else is worse than no constant at all: it
 /// reads as a fact about the linked library and is not one.
-fn publish_engine_provenance(version: Option<&str>, source: &str) {
+fn publish_engine_provenance(version: Option<&str>, source: &str, lib_path: &Path) {
     println!(
         "cargo:rustc-env=CHDB_EXPECTED_ENGINE_VERSION={}",
         version.unwrap_or_default()
     );
     println!("cargo:rustc-env=CHDB_ENGINE_SOURCE={source}");
+    // The artifact itself, so a test can inspect what was linked rather than
+    // guess where it came from.
+    println!(
+        "cargo:rustc-env=CHDB_LINKED_ARTIFACT={}",
+        lib_path.display()
+    );
+}
+
+/// Below this the linker emits no chained fixups, and a run proves nothing.
+const TEST_MIN_MACOS_FLOOR: u32 = 12;
+
+/// A macOS deployment floor for this crate's own test binaries.
+///
+/// What static linking has to be guarded against is decided at the final link:
+/// under macOS 12 the linker emits no chained fixups, so nothing can rebind a
+/// call inside the archive to the system C++ runtime and a green run says
+/// nothing about whether it could. Raising the floor is therefore the only way
+/// to exercise it — but the library, the examples and anything a user builds
+/// have no reason to move, which is why this goes out as `rustc-link-arg-tests`
+/// and reaches the test binaries alone. Measured: they come out at `minos 12.0`
+/// while an example beside them stays at the default 11.0.
+///
+/// One gap, since the directive is keyed on target kind: the unit-test binary
+/// built from the library is a `lib` target rather than a `test` one, so it
+/// keeps the default floor. The eight integration test binaries do get the
+/// floor, `runtime_faces` among them — and that is the suite written for this
+/// exact question, where all ten cases hang against an ungated archive. So what
+/// stays at the default is covered elsewhere at the raised one.
+///
+/// Opt-in, because a binary whose floor is above the running OS cannot run
+/// there. CI sets it; someone on an older macOS is not forced to.
+///
+/// Routing it through the build script rather than setting
+/// `MACOSX_DEPLOYMENT_TARGET` for the whole build is also what makes it take
+/// effect. That variable is not part of Cargo's fingerprint — measured, changing
+/// it does not relink — so two runs at different floors can silently share one
+/// binary. A build script's output is fingerprinted, so changing this does
+/// relink.
+fn emit_test_macos_floor() {
+    println!("cargo:rerun-if-env-changed=CHDB_TEST_MIN_MACOS");
+    let Some(floor) = env_dir("CHDB_TEST_MIN_MACOS") else {
+        return;
+    };
+    let Some(floor) = floor.to_str() else {
+        println!("cargo:warning=CHDB_TEST_MIN_MACOS is not a version number");
+        std::process::exit(1);
+    };
+
+    if target_platform().0 != "macos" {
+        // Said out loud rather than ignored: a floor set for a target that has
+        // no deployment target at all is a mistake somewhere, and silence would
+        // read as "the guard is on".
+        println!("cargo:warning=CHDB_TEST_MIN_MACOS={floor} ignored: the target is not macOS");
+        return;
+    }
+
+    let major = floor
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u32>().ok());
+    match major {
+        Some(major) if major >= TEST_MIN_MACOS_FLOOR => {
+            println!("cargo:rustc-link-arg-tests=-mmacosx-version-min={floor}");
+        }
+        Some(_) => {
+            println!("cargo:warning=CHDB_TEST_MIN_MACOS={floor} is below {TEST_MIN_MACOS_FLOOR}: the linker emits no chained fixups under that, so the tests would pass without exercising the binding this floor exists to exercise");
+            std::process::exit(1);
+        }
+        None => {
+            println!("cargo:warning=CHDB_TEST_MIN_MACOS={floor} does not start with a major version number");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Whether the enabled features ask rustc to link the engine statically.

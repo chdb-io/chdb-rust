@@ -30,11 +30,11 @@
 
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
-#[cfg(unix)]
-use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
+
+mod common;
 
 use chdb_rust::connection::Connection;
 use chdb_rust::error::Error;
@@ -523,37 +523,12 @@ fn run_child(exe: &Path, case: &Case) -> Result<Duration, String> {
     // yet, and nothing here depends on a writable temp directory. stderr is
     // inherited: the diagnostics are there, and swallowing them is how a failure
     // becomes unexplainable.
-    let mut command = Command::new(exe);
+    let mut command = common::command(exe);
     command
         .env(CASE_ENV, case.name)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-
-    // Force the standard library onto its fork/exec path.
-    //
-    // A statically linked artifact resolves posix_spawn and the whole
-    // posix_spawn_file_actions_* family against the engine's archive, which
-    // carries ClickHouse's glibc-compatibility shims. That posix_spawn
-    // deliberately ignores file actions - its own source says so: "callers are
-    // compiled against glibc's <spawn.h> ... walking it as `struct fdop` would
-    // dereference garbage. Posix_spawn callers that need file actions must avoid
-    // this stub or fall back to fork+exec". The standard library records a dup2
-    // action and calls it anyway, so the redirection is dropped without an
-    // error and the child writes to whatever stdout this process had. Measured
-    // on linux/aarch64 against libchdb.a v26.7.0: the case output appeared on
-    // the parent's stdout and the capture came back empty.
-    //
-    // A pre_exec closure is what makes the standard library skip the posix_spawn
-    // fast path. The fork/exec path calls dup2 directly, and that symbol the
-    // archive does not define.
-    //
-    // SAFETY: the closure allocates nothing, takes no locks and only returns
-    // Ok, which is all that is allowed between fork and exec.
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| Ok(()));
-    }
 
     let mut child = command.spawn().map_err(|e| format!("cannot spawn: {e}"))?;
 

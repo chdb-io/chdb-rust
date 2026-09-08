@@ -24,20 +24,28 @@ jobs:
     # it and reports test results for it, which is exactly the misleading outcome
     # the check exists to prevent.
     needs: engine_pin
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v3
-    - name: Fetch library
-      run: |
-          bash update_libchdb.sh --local
-          sudo mv libchdb.so /usr/lib/libchdb.so
-          sudo ldconfig
+    - uses: actions/checkout@v4
+    # --global rather than moving the library into /usr/lib by hand: it installs
+    # into /usr/local, which is on the default search path of both loaders, and
+    # skips ldconfig where there is none. One command for every platform here,
+    # and the same one the README gives users.
+    - name: Install the engine
+      run: ./update_libchdb.sh --global
+    # Once rather than once per platform: neither depends on the target.
     - name: Check formatting
+      if: matrix.os == 'ubuntu-latest'
       run: cargo fmt --check
     # Default features only. --all-features enables `static`, which downloads a
     # few hundred megabytes of archive that clippy then does not link; that
     # belongs in the job that links it.
     - name: Check clippy
+      if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets -- --deny warnings
     - name: Build
       run: cargo build --verbose
@@ -59,39 +67,67 @@ jobs:
   # the static archive and there is no dynamic library anywhere for the link to
   # reach instead, which is half of what check-static-link.sh then confirms.
   #
-  # Both cells take rustc's default macOS deployment target, and one more cell
-  # belongs here that is not here yet. 12.0 is where the linker starts emitting
-  # chained fixups, which is the mechanism that can bind a call inside the
-  # archive to the system C++ runtime instead of the copy the archive carries;
-  # below 12.0 there are none, so this job establishes that the tests ran
-  # against the archive but says nothing about that binding. Measured against
-  # the currently pinned engine: at the default 11.0 the suite passes, at 12.0 it
-  # hangs partway through and has to be killed. So the cell would be red for a
-  # reason that is not this repository's to fix - it is chdb-io/chdb-core#198,
-  # which bakes the visibility gate into the archive at compile time. Add
-  # `MACOSX_DEPLOYMENT_TARGET: "12.0"` as a matrix dimension when the pin moves
-  # to a release carrying that fix, and give each value its own
-  # CARGO_TARGET_DIR: the variable is not part of cargo's fingerprint, so
-  # changing it does not relink, and two cells sharing a target directory would
-  # test whichever binary was built first.
+  # CHDB_TEST_MIN_MACOS raises the macOS deployment floor of this crate's test
+  # binaries and nothing else. That is where the property has to be exercised:
+  # under macOS 12 the linker emits no chained fixups, so nothing can rebind a
+  # call made inside the archive to the system C++ runtime, and a green run
+  # would say nothing about whether it could. The library, the examples and
+  # anything a user builds stay at the default floor - see build.rs.
+  #
+  # It goes through the build script rather than MACOSX_DEPLOYMENT_TARGET
+  # because that variable is not part of Cargo's fingerprint: changing it does
+  # not relink, so a second cell sharing a target directory would silently
+  # re-run the first cell's binaries. A build script's output is fingerprinted.
   static:
     needs: engine_pin
     strategy:
-      # One platform failing should not hide the other's result: the two link
-      # with different linkers and only one of them has ever had this problem.
+      # The four platforms this crate claims to support. One failing should not
+      # hide the others: the two operating systems link with different linkers,
+      # only one of them has ever had this problem, and the two architectures
+      # get separately built archives.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
+          - os: macos-latest
+            test_min_macos: "12.0"
+          - os: macos-15-intel
+            test_min_macos: "12.0"
     runs-on: ${{ matrix.os }}
+    env:
+      # Empty on the platforms that have no deployment target, which build.rs
+      # reads as unset.
+      CHDB_TEST_MIN_MACOS: ${{ matrix.test_min_macos }}
     steps:
     - uses: actions/checkout@v4
 
+    # One cell, like the other lints: what clippy reports does not vary by
+    # architecture, and this is the step that materialises a second copy of the
+    # engine as a static rlib. Leaving it on every cell cost the arm64 runner
+    # its disk, and the runner service dies with it - "the runner has received a
+    # shutdown signal", exit 143, at the same point in the next step every time.
     - name: Check clippy with every feature
+      if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets --all-features -- --deny warnings
 
+    # --tests, because without it cargo also links the eight examples, and the
+    # filter below then discards them: seventeen artifacts of a few hundred
+    # megabytes built to keep nine.
+    #
+    # -j 2, because one link of this crate peaks at 4.7 GiB of resident memory,
+    # measured on aarch64 with GNU time. Cargo defaults to one job per core, so
+    # four of those at once want around 19 GiB on a runner that has 16, and the
+    # kernel takes the runner agent down with the build. Two fit.
+    #
+    # Both numbers are printed: the disk one because it was the first suspect
+    # and turned out to have 109 GB spare, the memory one because it is the
+    # constraint that actually binds.
     - name: Build the tests
       run: |
-        cargo test --features static --no-run --message-format=json > artifacts.json
+        df -h /
+        free -m || true
+        cargo test --features static --no-run --tests -j 2 --message-format=json > artifacts.json
         jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null)
                | .executable' artifacts.json > test-binaries.txt
         if [ ! -s test-binaries.txt ]; then
