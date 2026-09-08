@@ -111,14 +111,23 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets --all-features -- --deny warnings
 
+    # --tests, because without it cargo also links the eight examples, and the
+    # filter below then discards them: seventeen artifacts of a few hundred
+    # megabytes built to keep nine.
+    #
+    # -j 2, because one link of this crate peaks at 4.7 GiB of resident memory,
+    # measured on aarch64 with GNU time. Cargo defaults to one job per core, so
+    # four of those at once want around 19 GiB on a runner that has 16, and the
+    # kernel takes the runner agent down with the build. Two fit.
+    #
+    # Both numbers are printed: the disk one because it was the first suspect
+    # and turned out to have 109 GB spare, the memory one because it is the
+    # constraint that actually binds.
     - name: Build the tests
       run: |
-        # Printed because the way this job fails when it runs out is as a dead
-        # runner rather than as a build error: nine test binaries of a few
-        # hundred megabytes each, plus the unpacked archive and the rlib that
-        # carries a copy of it.
         df -h /
-        cargo test --features static --no-run --message-format=json > artifacts.json
+        free -m || true
+        cargo test --features static --no-run --tests -j 2 --message-format=json > artifacts.json
         jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null)
                | .executable' artifacts.json > test-binaries.txt
         if [ ! -s test-binaries.txt ]; then
