@@ -115,6 +115,8 @@ mod wal;
 
 pub use backend::{Backend, PutOutcome, ReplaceOutcome, Tagged};
 pub use backends::LocalBackend;
+#[cfg(feature = "durable-s3")]
+pub use backends::{Credentials, S3Backend, S3Options, MAX_SINGLE_PUT_BYTES};
 pub use chdb_engine::ChdbEngine;
 pub use digest::Digest;
 pub use engine::{Engine, EngineFactory, EngineStartOptions};

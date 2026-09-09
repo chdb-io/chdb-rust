@@ -15,7 +15,13 @@ arrow = { version = "59", optional = true, features = ["ffi"] }
 serde_json = { version = "1", optional = true }
 sha2 = { version = "0.10", optional = true }
 thiserror = "1"
+# The S3 backend signs its own requests: two operations do not justify an async
+# runtime and several dozen crates in the graph of every caller. Default
+# features are off to leave out gzip, which would decode a checkpoint nobody
+# asked it to decode.
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
 uuid = { version = "1", optional = true, features = ["v4"] }
+hmac = { version = "0.12", optional = true }
 
 [features]
 default = ["arrow"]
@@ -28,6 +34,8 @@ static = []
 # storage, as a full checkpoint plus a statement WAL under a leased head.json.
 # Needs an engine with the Durable V1 ABI (chdb-core v26.7.2-rc.2 or newer).
 durable = ["dep:serde_json", "dep:sha2", "dep:uuid"]
+# An S3-compatible backend for `durable` — AWS S3, Cloudflare R2, MinIO.
+durable-s3 = ["durable", "dep:ureq", "dep:hmac"]
 
 [build-dependencies]
 bindgen = "0.70.1"
@@ -74,6 +82,10 @@ required-features = ["durable"]
 [[test]]
 name = "durable_engine"
 required-features = ["durable"]
+
+[[test]]
+name = "durable_s3"
+required-features = ["durable-s3"]
 
 [[example]]
 name = "09_durable_object"

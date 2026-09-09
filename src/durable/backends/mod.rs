@@ -6,12 +6,20 @@
 //! approximating it — see [`local`] for why that matters even for a backend
 //! whose scope is development and conformance.
 //!
-//! An S3-compatible backend is a separate piece of work, and deliberately not
-//! in this crate's dependency graph until it exists: a caller that only ever
-//! uses a directory should not carry a cloud SDK. Until then, a provider is
-//! plugged in by implementing [`Backend`](super::Backend) and handing it to
+//! The S3-compatible backend is behind its own feature, `durable-s3`, so a
+//! caller that only ever uses a directory does not carry an HTTP stack and a
+//! TLS implementation. Any other provider is plugged in by implementing
+//! [`Backend`](super::Backend) and handing it to
 //! [`Namespace::with_backend`](super::Namespace::with_backend).
 
 pub mod local;
+#[cfg(feature = "durable-s3")]
+pub mod s3;
+#[cfg(feature = "durable-s3")]
+mod sigv4;
 
 pub use local::LocalBackend;
+#[cfg(feature = "durable-s3")]
+pub use s3::{S3Backend, S3Options, MAX_SINGLE_PUT_BYTES};
+#[cfg(feature = "durable-s3")]
+pub use sigv4::Credentials;

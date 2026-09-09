@@ -30,6 +30,17 @@ pub struct Digest {
     pub sha256: String,
 }
 
+impl Digest {
+    /// Measures a buffer.
+    ///
+    /// Public because [`Backend`](super::Backend) is implementable outside this
+    /// crate, and `put_file_if_absent` takes the digest its caller already
+    /// computed — an implementation being tested needs a way to produce one.
+    pub fn of(data: &[u8]) -> Self {
+        digest_of(data)
+    }
+}
+
 /// Hashes a buffer.
 pub(crate) fn digest_of(data: &[u8]) -> Digest {
     let mut hasher = Sha256::new();

@@ -49,10 +49,83 @@ impl std::fmt::Debug for Namespace {
     }
 }
 
+/// The query parameters of a namespace URL, percent-decoded.
+#[cfg(feature = "durable-s3")]
+///
+/// Decoded because an `endpoint` value carries `://`, and a caller that
+/// escaped it — as any URL builder would — should get the same backend as one
+/// who did not.
+fn query_of(url: &str) -> Vec<(String, String)> {
+    let Some((_, query)) = url.split_once('?') else {
+        return Vec::new();
+    };
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (percent_decode(name), percent_decode(value))
+        })
+        .collect()
+}
+
+#[cfg(feature = "durable-s3")]
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+                match u8::from_str_radix(hex, 16) {
+                    Ok(byte) => {
+                        out.push(byte);
+                        index += 3;
+                    }
+                    // Not an escape after all: a literal `%` is not an error,
+                    // and mangling it would be worse than passing it through.
+                    Err(_) => {
+                        out.push(b'%');
+                        index += 1;
+                    }
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The bucket and base prefix an `s3://` URL names.
+#[cfg(feature = "durable-s3")]
+fn s3_location(url: &str) -> Result<(String, String)> {
+    let location = url
+        .trim_start_matches("s3://")
+        .split('?')
+        .next()
+        .unwrap_or_default();
+    let (bucket, prefix) = match location.split_once('/') {
+        Some((bucket, prefix)) => (bucket, prefix.trim_matches('/')),
+        None => (location, ""),
+    };
+    if bucket.is_empty() {
+        return Err(err(
+            Category::Backend,
+            format!("durable: an s3 namespace URL needs a bucket, got {url:?}"),
+        ));
+    }
+    Ok((bucket.to_string(), prefix.to_string()))
+}
+
 /// The directory a `file://` or `local:` URL names, or a plain absolute path.
 ///
 /// A typo in a configuration file fails here rather than at the first open.
 fn local_root(url: &str) -> Result<PathBuf> {
+    let url = url.split('?').next().unwrap_or(url);
     let path = url
         .strip_prefix("file://")
         .or_else(|| url.strip_prefix("file:"))
@@ -100,11 +173,78 @@ impl Namespace {
     /// Returns [`Category::Backend`] for a relative path or a scheme this build
     /// has no backend for.
     pub fn new(url: &str) -> Result<Self> {
+        if url.starts_with("s3://") {
+            return Self::s3(url);
+        }
         let root = local_root(url)?;
         Ok(Self::with_backend(Box::new(move |id| {
             Ok(Arc::new(LocalBackend::new(root.join(id))?))
         }))
         .named(url))
+    }
+
+    /// Binds a namespace to an S3-compatible bucket.
+    ///
+    /// ```text
+    /// AWS    s3://my-bucket/durable?region=eu-central-1
+    /// R2     s3://my-bucket/durable?region=auto&endpoint=https://<id>.r2.cloudflarestorage.com
+    /// MinIO  s3://my-bucket/durable?endpoint=http://127.0.0.1:9000
+    /// ```
+    ///
+    /// Credentials are deliberately not among the parameters. They come from
+    /// the environment or the shared credentials file, because a namespace URL
+    /// is the sort of thing that gets logged, put in a config file and pasted
+    /// into an issue. See [`Credentials::resolve`](super::Credentials::resolve)
+    /// for the order, and for what to do with an SSO profile.
+    #[cfg(feature = "durable-s3")]
+    fn s3(url: &str) -> Result<Self> {
+        use super::backends::{S3Backend, S3Options};
+
+        let (bucket, base_prefix) = s3_location(url)?;
+        let query = query_of(url);
+        let value = |name: &str| {
+            query
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+                .filter(|value| !value.is_empty())
+        };
+        // `pathStyle` too, because that is what the Go binding's URLs use and
+        // the same configuration string should work in both.
+        let path_style = value("path_style")
+            .or_else(|| value("pathStyle"))
+            .map(|raw| raw == "true" || raw == "1");
+
+        let region = value("region");
+        let endpoint = value("endpoint");
+        Ok(Self::with_backend(Box::new(move |id| {
+            let prefix = if base_prefix.is_empty() {
+                id.to_string()
+            } else {
+                format!("{base_prefix}/{id}")
+            };
+            Ok(Arc::new(S3Backend::new(S3Options {
+                bucket: bucket.clone(),
+                prefix,
+                region: region.clone(),
+                endpoint: endpoint.clone(),
+                path_style,
+                ..S3Options::default()
+            })?))
+        }))
+        .named(url))
+    }
+
+    /// The `s3` scheme needs the `durable-s3` feature, which is what carries
+    /// the HTTP and TLS stack it signs requests with.
+    #[cfg(not(feature = "durable-s3"))]
+    fn s3(url: &str) -> Result<Self> {
+        Err(err(
+            Category::Backend,
+            format!(
+                "durable: {url:?} needs the `durable-s3` feature, which is off in this build;                  enable it, or pass your own backend to Namespace::with_backend"
+            ),
+        ))
     }
 
     /// Binds a namespace to a backend of your own.
@@ -230,9 +370,49 @@ mod test {
 
     #[test]
     fn a_scheme_this_build_cannot_serve_fails_at_configuration_time() {
-        let error = local_root("s3://bucket/prefix").expect_err("no S3 backend here");
+        let error = local_root("gs://bucket/prefix").expect_err("no GCS backend here");
         assert_eq!(error.category(), Category::Backend);
         assert!(error.to_string().contains("backend factory"), "{error}");
+    }
+
+    #[cfg(feature = "durable-s3")]
+    #[test]
+    fn an_s3_url_splits_into_a_bucket_and_a_prefix() {
+        assert_eq!(
+            s3_location("s3://my-bucket/durable/objects?region=eu-central-1").unwrap(),
+            ("my-bucket".to_string(), "durable/objects".to_string())
+        );
+        assert_eq!(
+            s3_location("s3://my-bucket").unwrap(),
+            ("my-bucket".to_string(), String::new()),
+            "a bucket with no prefix is the bucket root"
+        );
+        assert_eq!(
+            s3_location("s3://my-bucket/").unwrap(),
+            ("my-bucket".to_string(), String::new())
+        );
+        assert_eq!(
+            s3_location("s3://").unwrap_err().category(),
+            Category::Backend
+        );
+    }
+
+    #[cfg(feature = "durable-s3")]
+    #[test]
+    fn a_query_value_survives_being_escaped_by_a_url_builder() {
+        let query = query_of("s3://b/p?region=auto&endpoint=https%3A%2F%2Fx.example&pathStyle=1");
+        assert_eq!(query[0], ("region".to_string(), "auto".to_string()));
+        assert_eq!(
+            query[1],
+            ("endpoint".to_string(), "https://x.example".to_string()),
+            "an escaped endpoint has to mean the same as an unescaped one"
+        );
+        assert_eq!(query[2], ("pathStyle".to_string(), "1".to_string()));
+
+        assert!(query_of("s3://b/p").is_empty());
+        // A stray percent is a literal, not a reason to fail a configuration.
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
     }
 
     #[test]

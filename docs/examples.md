@@ -482,9 +482,27 @@ match object.flush() {
 
 ### Backends
 
-A local directory (`file:///path`, `local:/path`, or a bare absolute path) is
-the only backend that ships, and it is for development, tests and single-host
-use. A cloud provider is plugged in by implementing `durable::Backend` — six
+A local directory (`file:///path`, `local:/path`, or a bare absolute path) comes
+with `--features durable`, and is for development, tests and single-host use.
+
+`--features durable-s3` adds S3-compatible storage — AWS, R2, MinIO — which is
+what lets a different machine recover the object:
+
+```rust
+use chdb_rust::durable::Namespace;
+
+let namespace = Namespace::new("s3://my-bucket/durable?region=eu-central-1")?;
+# Ok::<(), chdb_rust::durable::Error>(())
+```
+
+Credentials come from the environment or `~/.aws/credentials`, never from the
+URL. For an SSO profile, export them first:
+
+```bash
+eval "$(aws configure export-credentials --profile my-profile --format env)"
+```
+
+Any other provider is plugged in by implementing `durable::Backend` — six
 methods, of which the two conditional writes carry the whole protocol — and
 handing it to `Namespace::with_backend`.
 

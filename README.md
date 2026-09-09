@@ -349,14 +349,57 @@ The same three engine entry points are available directly, without the feature,
 on any engine that exports them: see
 [`Connection::backup_database`, `restore_database` and `classify_query`](src/admin.rs).
 
-A local directory is the only backend that ships; a cloud provider is plugged in
-by implementing `durable::Backend` and passing it to `Namespace::with_backend`.
+### Backends
+
+`--features durable` ships a local directory: `file:///path`, `local:/path`, or
+a bare absolute path. It is for development, tests and single-host use — a
+directory on one machine cannot be the authority another machine recovers from.
+
+`--features durable-s3` adds S3-compatible storage, which is what makes an
+object recoverable somewhere else:
+
+```rust
+// AWS
+let namespace = Namespace::new("s3://my-bucket/durable?region=eu-central-1")?;
+// Cloudflare R2
+let namespace = Namespace::new(
+    "s3://my-bucket/durable?region=auto&endpoint=https://<id>.r2.cloudflarestorage.com",
+)?;
+// MinIO
+let namespace = Namespace::new("s3://my-bucket/durable?endpoint=http://127.0.0.1:9000")?;
+```
+
+The two conditional writes the protocol rests on are the provider's own:
+`If-None-Match: *` for a create nobody can both win, `If-Match: <etag>` for the
+compare-and-swap that fences a superseded writer. Requests are signed in-crate
+rather than through `aws-sdk-s3`, so enabling this costs an HTTP and TLS stack
+rather than an async runtime and several dozen crates.
+
+Credentials are never part of the URL — a namespace URL gets logged, committed
+and pasted into issues. They come from `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, or from `~/.aws/credentials`
+honouring `AWS_PROFILE`. SSO and instance roles are not resolved in-crate;
+export them first, the way the CLI does:
+
+```bash
+eval "$(aws configure export-credentials --profile my-profile --format env)"
+```
+
+`AWS_CA_BUNDLE` is honoured, so a host behind a TLS-inspecting proxy works the
+same way `aws s3` does beside it. Any other provider is plugged in by
+implementing `durable::Backend` — six methods — and passing it to
+`Namespace::with_backend`.
+
 The protocol is specified in [CHDB_DURABLE_V1_CONTRACT.md][contract] in the chdb
 repository, which is the source of truth rather than this implementation.
 
 ```bash
 cargo run --features durable --example 09_durable_object
 cargo test --features durable
+
+# Against a bucket you own. Skipped, loudly, when the variable is unset.
+export CHDB_DURABLE_S3_BUCKET=my-bucket CHDB_DURABLE_S3_REGION=eu-central-1
+cargo test --features durable-s3 --test durable_s3 -- --test-threads=1
 ```
 
 Needs chdb-core v26.7.2-rc.2 or newer, which is where backup, restore and
