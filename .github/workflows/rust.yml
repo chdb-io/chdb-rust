@@ -55,6 +55,25 @@ jobs:
       run: cargo test -- --test-threads=1
       env:
         RUST_BACKTRACE: full
+    # A second cell of the same matrix rather than a job of its own: the durable
+    # protocol is only as good as the engine underneath it, so it has to be
+    # exercised on every platform the crate claims, against the engine installed
+    # above. The feature is off by default, so nothing else here would compile
+    # it, let alone run it.
+    - name: Run the durable tests
+      run: cargo test --features durable -- --test-threads=1
+      env:
+        RUST_BACKTRACE: full
+    # The S3 backend has no credentials here, and its own tests skip themselves
+    # without a bucket. What this still catches is the half that does not need
+    # one: that the feature compiles, and that the signer, the URL forms and the
+    # status mapping still agree with their unit tests. The real bucket runs
+    # locally, against `cargo test --features durable-s3 --test durable_s3`.
+    - name: Check the S3 backend
+      if: matrix.os == 'ubuntu-latest'
+      run: cargo test --features durable-s3 --lib -- --test-threads=1 durable::backends
+      env:
+        RUST_BACKTRACE: full
 
   # Static linking, built and run rather than merely compiled. Until this job
   # existed the only step that enabled the feature was a `clippy --all-features`

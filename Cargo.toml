@@ -12,7 +12,16 @@ keywords = ["clickhouse", "chdb", "database", "embedded", "analytics"]
 
 [dependencies]
 arrow = { version = "59", optional = true, features = ["ffi"] }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
 thiserror = "1"
+# The S3 backend signs its own requests: two operations do not justify an async
+# runtime and several dozen crates in the graph of every caller. Default
+# features are off to leave out gzip, which would decode a checkpoint nobody
+# asked it to decode.
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+uuid = { version = "1", optional = true, features = ["v4"] }
+hmac = { version = "0.12", optional = true }
 
 [features]
 default = ["arrow"]
@@ -21,6 +30,12 @@ arrow = ["dep:arrow"]
 # By default, we link dynamically.
 # Users can opt-in to static linking with --features static
 static = []
+# chDB Durable V1: a database whose authoritative state lives in object
+# storage, as a full checkpoint plus a statement WAL under a leased head.json.
+# Needs an engine with the Durable V1 ABI (chdb-core v26.7.2-rc.2 or newer).
+durable = ["dep:serde_json", "dep:sha2", "dep:uuid"]
+# An S3-compatible backend for `durable` — AWS S3, Cloudflare R2, MinIO.
+durable-s3 = ["durable", "dep:ureq", "dep:hmac"]
 
 [build-dependencies]
 bindgen = "0.70.1"
@@ -60,6 +75,22 @@ required-features = ["arrow"]
 name = "runtime_faces"
 harness = false
 
+[[test]]
+name = "durable_conformance"
+required-features = ["durable"]
+
+[[test]]
+name = "durable_engine"
+required-features = ["durable"]
+
+[[test]]
+name = "durable_s3"
+required-features = ["durable-s3"]
+
+[[example]]
+name = "09_durable_object"
+required-features = ["durable"]
+
 [package.metadata.chdb]
 # The chdb-core release this crate builds against. This is a chdb-core release
 # number, not a ClickHouse one: X.Y is the ClickHouse minor line the release sits
@@ -75,6 +106,12 @@ harness = false
 #
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.
+#
+# Release gate: this crate does not publish against a release candidate. The pin
+# moves to v26.7.3 — the first stable release carrying the Durable V1 ABI — and
+# the test matrix runs again before anything goes to crates.io. Until then rc.2
+# is what local builds and CI test against, since it is where backup, restore
+# and statement analysis first appeared.
 engine = "v26.7.2-rc.2"
 
 [package.metadata.docs.rs]

@@ -28,6 +28,8 @@
 //! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //! - **Version accessors** ([`version`]): which chdb-core release is linked, where it came from, and which ClickHouse it carries
+//! - **Backup, restore and statement analysis** ([`admin`]): the chdb-core management ABI, on any engine that exports it
+//! - **Durable objects** (feature `durable`, [`durable`]): a database whose authoritative state is a checkpoint plus a statement WAL in storage you own
 //!
 //! ## Examples
 //!
@@ -38,6 +40,8 @@
 //! This crate uses `unsafe` code to interface with the C library, but provides a safe Rust API.
 //! All public functions are safe to call, and the crate ensures proper resource cleanup.
 
+#[cfg(has_durable_abi)]
+pub mod admin;
 pub mod arg;
 #[cfg(feature = "arrow")]
 pub mod arrow_insert;
@@ -67,6 +71,17 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 pub mod connection;
+// The `durable` feature needs the chdb-core management ABI, and a library that
+// does not export it cannot serve a durable object at all. Saying so at compile
+// time beats a link error naming three symbols.
+#[cfg(all(feature = "durable", not(has_durable_abi)))]
+compile_error!(
+    "the `durable` feature needs a libchdb with the Durable V1 ABI (chdb_backup_database_n, \
+     chdb_restore_database_n, chdb_classify_query_n), which is chdb-core v26.7.2-rc.2 or newer. \
+     Update the engine with ./update_libchdb.sh, or point CHDB_LIB_DIR at a newer one."
+);
+#[cfg(all(feature = "durable", has_durable_abi))]
+pub mod durable;
 pub mod error;
 pub mod format;
 pub mod log_level;
