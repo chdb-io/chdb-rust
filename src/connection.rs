@@ -44,8 +44,8 @@ pub struct Connection {
     // Pointer to chdb_connection (which is *mut chdb_connection_)
     inner: *mut bindings::chdb_connection,
     /// Holds this connection's claim on the process-wide engine. Dropping it
-    /// is what lets a later connection bind a different data path.
-    _slot: registry::Slot,
+    /// lets a later connection bind a different data path.
+    slot: registry::Slot,
 }
 
 // Safety: Connection is safe to send between threads
@@ -103,7 +103,7 @@ impl Connection {
 
         Ok(Self {
             inner: conn_ptr,
-            _slot: slot,
+            slot,
         })
     }
 
@@ -468,6 +468,16 @@ fn check_insert_result(result_ptr: *mut bindings::chdb_result) -> Result<()> {
 
     let result = QueryResult::new(result_ptr);
     result.check_error().map(|_| ())
+}
+
+impl Connection {
+    /// Removes `dir` once this is the last connection on its data path.
+    ///
+    /// The removal happens while the engine record is locked, so a connection
+    /// cannot attach to the path in between and lose its data.
+    pub(crate) fn remove_dir_on_last(&mut self, dir: std::path::PathBuf) {
+        self.slot.remove_on_last(dir);
+    }
 }
 
 impl Drop for Connection {

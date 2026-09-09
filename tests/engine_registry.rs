@@ -1,7 +1,7 @@
 //! What the process-wide engine record says, and when it refuses.
 //!
-//! These tests need the engine to themselves, so each leaves it idle and the
-//! harness runs them one at a time.
+//! These tests need the engine to themselves, so each takes [`engine`] first
+//! and leaves the engine idle afterwards.
 
 use chdb_rust::connection::Connection;
 use chdb_rust::error::Error;
@@ -10,8 +10,22 @@ use chdb_rust::{active_engine_path, active_engine_refs};
 
 mod common;
 
+/// Takes the engine for one test.
+///
+/// The engine is process-wide, so these tests cannot overlap: each asserts it
+/// starts from an idle engine. Serializing here rather than relying on
+/// `--test-threads=1` means a plain `cargo test` reports real failures instead
+/// of collisions.
+fn engine() -> std::sync::MutexGuard<'static, ()> {
+    static ENGINE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ENGINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn the_record_counts_every_open_handle() {
+    let _engine = engine();
     assert_eq!(
         active_engine_refs(),
         0,
@@ -53,6 +67,7 @@ fn the_record_counts_every_open_handle() {
 
 #[test]
 fn a_second_data_path_is_refused_by_name() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let held = common::tempdir();
     let other = common::tempdir();
@@ -97,6 +112,7 @@ fn a_second_data_path_is_refused_by_name() {
 /// session on disk. That is what makes `execute` refuse while one is open.
 #[test]
 fn an_in_memory_connection_is_a_data_path() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let dir = common::tempdir();
     let session = SessionBuilder::new()
@@ -130,6 +146,7 @@ fn an_in_memory_connection_is_a_data_path() {
 
 #[test]
 fn the_next_path_is_free_once_the_last_handle_goes() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let first = common::tempdir();
     let second = common::tempdir();
@@ -160,6 +177,7 @@ fn the_next_path_is_free_once_the_last_handle_goes() {
 /// second session attaches instead of being refused.
 #[test]
 fn one_directory_named_two_ways_shares_the_engine() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let dir = common::tempdir();
     let plain = dir.path().to_path_buf();
@@ -203,6 +221,7 @@ fn one_directory_named_two_ways_shares_the_engine() {
 /// so a sibling's data survives.
 #[test]
 fn auto_cleanup_leaves_a_shared_path_alone() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let dir = common::tempdir();
     let path = dir.path().to_path_buf();
@@ -275,6 +294,7 @@ fn auto_cleanup_leaves_a_shared_path_alone() {
 /// `cleanup` ignores the flag but still yields to siblings.
 #[test]
 fn cleanup_is_explicit_and_still_yields_to_siblings() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let dir = common::tempdir();
     let path = dir.path().to_path_buf();
@@ -288,14 +308,14 @@ fn cleanup_is_explicit_and_still_yields_to_siblings() {
         .build()
         .expect("other");
 
-    other.cleanup().expect("cleanup with a sibling open");
+    other.cleanup();
     assert!(
         path.exists(),
         "cleanup must not delete from under a sibling"
     );
     assert_eq!(active_engine_refs(), 1);
 
-    keeper.cleanup().expect("cleanup as the last handle");
+    keeper.cleanup();
     assert!(
         !path.exists(),
         "the last handle's cleanup removes the directory"
@@ -307,6 +327,7 @@ fn cleanup_is_explicit_and_still_yields_to_siblings() {
 /// thread using it.
 #[test]
 fn sessions_on_one_path_query_from_several_threads() {
+    let _engine = engine();
     assert_eq!(active_engine_refs(), 0);
     let dir = common::tempdir();
     let path = dir.path().to_path_buf();
@@ -358,5 +379,99 @@ fn sessions_on_one_path_query_from_several_threads() {
         "every reader should have released its handle"
     );
     drop(writer);
+    assert_eq!(active_engine_refs(), 0);
+}
+
+/// A symlinked data path is not followed when the directory is removed: the
+/// link goes, the directory it pointed at stays.
+#[test]
+fn auto_cleanup_does_not_follow_a_symlink() {
+    let _engine = engine();
+    assert_eq!(active_engine_refs(), 0);
+    let real = common::tempdir();
+    let target = real.path().join("target");
+    std::fs::create_dir(&target).expect("target");
+    std::fs::write(target.join("keep-me"), b"x").expect("marker");
+
+    let link = real.path().join("link");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+    let session = SessionBuilder::new()
+        .with_data_path(&link)
+        .with_auto_cleanup(true)
+        .build()
+        .expect("session on a symlink");
+    drop(session);
+
+    assert!(
+        target.join("keep-me").exists(),
+        "the directory the link pointed at must survive"
+    );
+}
+
+/// Two sessions releasing at the same time: exactly one of them is last, and
+/// the directory goes with it.
+#[test]
+fn concurrent_drops_still_remove_the_directory() {
+    let _engine = engine();
+    assert_eq!(active_engine_refs(), 0);
+    let dir = common::tempdir();
+    let path = dir.path().to_path_buf();
+
+    let mut threads = Vec::new();
+    for _ in 0..2 {
+        let path = path.clone();
+        threads.push(std::thread::spawn(move || {
+            let session = SessionBuilder::new()
+                .with_data_path(&path)
+                .with_auto_cleanup(true)
+                .build()
+                .expect("session");
+            session.execute("SELECT 1", None).expect("query");
+            // Both release at roughly the same moment, which is the point.
+            drop(session);
+        }));
+    }
+    for thread in threads {
+        thread.join().expect("thread");
+    }
+
+    assert_eq!(active_engine_refs(), 0);
+    assert!(
+        !path.exists(),
+        "the last handle to go should have removed the directory"
+    );
+}
+
+/// Cleanup cannot delete the directory out from under a connection that
+/// attaches while it is releasing.
+#[test]
+fn cleanup_does_not_race_a_new_connection() {
+    let _engine = engine();
+    assert_eq!(active_engine_refs(), 0);
+    let dir = common::tempdir();
+    let path = dir.path().to_path_buf();
+
+    let holder = SessionBuilder::new()
+        .with_data_path(&path)
+        .build()
+        .expect("holder");
+    let leaving = SessionBuilder::new()
+        .with_data_path(&path)
+        .build()
+        .expect("leaving");
+
+    leaving.cleanup();
+
+    assert!(path.exists(), "a sibling was still holding the path");
+    assert_eq!(
+        holder
+            .execute("SELECT 1", None)
+            .expect("still usable")
+            .data_utf8_lossy()
+            .trim(),
+        "1"
+    );
+    drop(holder);
     assert_eq!(active_engine_refs(), 0);
 }

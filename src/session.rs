@@ -23,7 +23,6 @@ use crate::connection::Connection;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
-use crate::registry;
 
 /// Builder for creating [`Session`] instances.
 ///
@@ -98,7 +97,6 @@ pub struct Session {
     conn: Option<Connection>,
     data_path: PathBuf,
     default_format: OutputFormat,
-    auto_cleanup: bool,
 }
 
 impl<'a> SessionBuilder<'a> {
@@ -269,23 +267,27 @@ impl<'a> SessionBuilder<'a> {
         fs::remove_file(&probe_path).ok(); // best-effort cleanup of write probe
 
         // The engine compares path strings verbatim, so spellings converge
-        // here: "db", "./db" and "db/" reach it as one string and share an
-        // engine. The directory exists by now.
-        self.data_path = self.data_path.canonicalize()?;
-        let data_path = self.data_path.to_str().ok_or(Error::PathError)?;
-        let path_arg = format!("--path={data_path}");
+        // before it sees them: "db", "./db" and "db/" reach it as one string
+        // and share an engine. Only the argument is canonical; data_path stays
+        // as given, so cleanup removes what the caller named rather than what a
+        // symlink pointed at.
+        let canonical = self.data_path.canonicalize()?;
+        let canonical = canonical.to_str().ok_or(Error::PathError)?;
+        let path_arg = format!("--path={canonical}");
         let owned: Vec<String> = self.arguments.iter().map(|a| a.to_string()).collect();
         let mut args: Vec<&str> = Vec::with_capacity(1 + owned.len());
         args.push(&path_arg);
         args.extend(owned.iter().map(String::as_str));
 
-        let conn = Connection::open(&args)?;
+        let mut conn = Connection::open(&args)?;
+        if self.auto_cleanup {
+            conn.remove_dir_on_last(self.data_path.clone());
+        }
 
         Ok(Session {
             conn: Some(conn),
             data_path: self.data_path,
             default_format: self.default_format,
-            auto_cleanup: self.auto_cleanup,
         })
     }
 }
@@ -359,26 +361,23 @@ impl Session {
             .expect("a session holds its connection until it is dropped")
     }
 
-    /// The canonical data path this session is on.
+    /// The data path this session is on, as it was given.
     pub fn path(&self) -> &Path {
         &self.data_path
     }
 
     /// Closes this session and removes its data directory, whether or not
-    /// [`SessionBuilder::with_auto_cleanup`] was set, and only when this is the
+    /// [`SessionBuilder::with_auto_cleanup`] was set, and only once this is the
     /// last handle on the path.
     ///
-    /// # Errors
-    ///
-    /// Returns the I/O error if the directory could not be removed. A session
-    /// that is not the last handle removes nothing and returns `Ok`.
-    pub fn cleanup(mut self) -> Result<()> {
-        let last = registry::refs() == 1;
-        drop(self.conn.take());
-        if last {
-            fs::remove_dir_all(&self.data_path)?;
+    /// Removal is best effort, as it is on drop: it happens while the engine
+    /// record is locked, so there is no error to hand back.
+    pub fn cleanup(mut self) {
+        let dir = self.data_path.clone();
+        if let Some(conn) = self.conn.as_mut() {
+            conn.remove_dir_on_last(dir);
         }
-        Ok(())
+        drop(self.conn.take());
     }
 
     /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
@@ -439,18 +438,12 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // Asked while this session still counts.
-        let last = registry::refs() == 1;
-
-        // Released before the directory goes, not while the engine is still
-        // writing to it.
+        // Releasing the connection is the whole teardown. Whether this was the
+        // last handle, and so whether the directory goes, is decided while the
+        // engine record is locked; deciding it here would race both a fresh
+        // connection on the same path and another session releasing at the same
+        // moment.
         drop(self.conn.take());
-
-        // A session that is not the last one leaves the directory alone, rather
-        // than taking the data out from under its siblings.
-        if self.auto_cleanup && last {
-            fs::remove_dir_all(&self.data_path).ok();
-        }
     }
 }
 

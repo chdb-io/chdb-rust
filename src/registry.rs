@@ -8,6 +8,8 @@
 //! Connections opened against libchdb by another crate in the same process are
 //! not visible here, and the engine would refuse those the same way.
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use crate::error::{Error, Result};
@@ -34,6 +36,15 @@ fn registry() -> &'static Mutex<Registry> {
 #[derive(Debug)]
 pub(crate) struct Slot {
     key: String,
+    /// Removed when this slot is the last one released.
+    remove_on_last: Option<PathBuf>,
+}
+
+impl Slot {
+    /// Removes `dir` if this slot turns out to be the last on its path.
+    pub(crate) fn remove_on_last(&mut self, dir: PathBuf) {
+        self.remove_on_last = Some(dir);
+    }
 }
 
 impl Drop for Slot {
@@ -47,6 +58,11 @@ impl Drop for Slot {
         registry.refs = registry.refs.saturating_sub(1);
         if registry.refs == 0 {
             registry.active = None;
+            // Under the lock, so no connection can acquire the path between
+            // this becoming the last handle and the directory going.
+            if let Some(dir) = self.remove_on_last.take() {
+                let _ = fs::remove_dir_all(dir);
+            }
         }
         debug_assert!(
             registry.refs == 0 || registry.active.as_deref() == Some(self.key.as_str()),
@@ -76,7 +92,10 @@ pub(crate) fn acquire(key: String) -> Result<Slot> {
     }
 
     registry.refs += 1;
-    Ok(Slot { key })
+    Ok(Slot {
+        key,
+        remove_on_last: None,
+    })
 }
 
 /// The path the engine is currently bound to, or `None` when it is not running.
