@@ -12,6 +12,7 @@ This document provides simple and easy-to-follow examples for using chdb-rust, a
 6. [Reading from Files](#reading-from-files)
 7. [Error Handling](#error-handling)
 8. [Fast Bulk Inserts (Arrow)](#fast-bulk-inserts-arrow)
+9. [Durable Objects](#durable-objects)
 
 ## Basic Setup
 
@@ -393,6 +394,103 @@ session.insert_record_batch("metrics", "flush_1", &batch)?;
 `dest_table` must be a bare ClickHouse table identifier (e.g. `metrics`); dotted names (`db.table`) and reserved words are not quoted automatically.
 
 See `examples/08_arrow_insert.rs` for a runnable program.
+
+## Durable Objects
+
+Enabled by `--features durable`. A durable object is a chDB database whose
+authoritative state lives in storage you own — a full checkpoint plus a
+statement write-ahead log under one compare-and-set `head.json` — in the layout
+the Python, Node and Go bindings share, so any of them can recover an object the
+others wrote.
+
+```rust
+use chdb_rust::durable::{Namespace, OpenOptions};
+use chdb_rust::format::OutputFormat;
+
+let namespace = Namespace::new("file:///var/lib/chdb-durable")?
+    .with_owner("worker-1");
+
+// `existed` tells "restored" from "created" without a second round-trip.
+let (object, existed) = namespace.open("tenant-123", OpenOptions {
+    database: Some("mem".to_string()),
+    ..OpenOptions::default()
+})?;
+
+if !existed {
+    object.execute(
+        "CREATE TABLE events (id UInt64, tag String) ENGINE = MergeTree ORDER BY id",
+    )?;
+}
+
+// execute() runs the statement here and buffers it for the WAL. It is not a
+// durability barrier; flush_through() is.
+let ticket = object.execute("INSERT INTO events VALUES (1, 'first')")?;
+object.flush_through(ticket)?;
+
+let rows = object.query("SELECT count() FROM events", OutputFormat::CSV)?;
+println!("{}", String::from_utf8_lossy(&rows));
+
+// Fold the WAL into a fresh full checkpoint, so recovery reads one archive
+// rather than replaying a long chain.
+object.checkpoint()?;
+
+// close() drains, flushes and releases the lease. Dropping the handle instead
+// reclaims local resources but leaves the lease to expire on its own.
+object.close()?;
+# Ok::<(), chdb_rust::durable::Error>(())
+```
+
+### What can be logged
+
+Recovery re-executes the logged SQL, so a statement has to mean the same thing
+twice:
+
+```rust
+// DO: compute the value in the caller and log the literal.
+let now = "2026-09-07 12:00:00";
+object.execute(&format!("INSERT INTO events VALUES (1, '{now}')"))?;
+
+// DON'T: now(), rand(), generateUUIDv4(), or INSERT ... SELECT from anything
+// that can change underneath you. Replay would produce different rows.
+# Ok::<(), chdb_rust::durable::Error>(())
+```
+
+Every statement goes to ClickHouse's own parser before it runs, and the answer
+is the gate: exactly one statement, the right class, every persistent write
+inside this object's database, no embedded credential. Refusals come back as
+`Category::ClassificationRefused` or `Category::SecretRefused`, and the message
+never quotes the statement.
+
+### Handling failure
+
+```rust
+use chdb_rust::durable::Category;
+
+match object.flush() {
+    Ok(published) => { /* committed, and another process can recover it */ }
+    Err(e) if e.category() == Category::CommitAmbiguous => {
+        // The remote may or may not have committed. Never retried blindly:
+        // reopen the object and look at the manifest.
+    }
+    Err(e) if e.category() == Category::LeaseFenced => {
+        // Another writer took the object. This handle is done.
+    }
+    Err(e) => return Err(e),
+}
+# Ok::<(), chdb_rust::durable::Error>(())
+```
+
+### Backends
+
+A local directory (`file:///path`, `local:/path`, or a bare absolute path) is
+the only backend that ships, and it is for development, tests and single-host
+use. A cloud provider is plugged in by implementing `durable::Backend` — six
+methods, of which the two conditional writes carry the whole protocol — and
+handing it to `Namespace::with_backend`.
+
+See `examples/09_durable_object.rs` for a runnable program, and
+[CHDB_DURABLE_V1_CONTRACT.md](https://github.com/chdb-io/chdb/blob/main/dev-docs/CHDB_DURABLE_V1_CONTRACT.md)
+for the protocol itself, which is the source of truth rather than this crate.
 
 ## Additional Resources
 

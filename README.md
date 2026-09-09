@@ -300,6 +300,71 @@ See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or r
 cargo run --example 08_arrow_insert
 ```
 
+## Durable Objects
+
+`--features durable` turns a database into an object in storage you own: a full
+checkpoint plus a statement write-ahead log under one compare-and-set
+`head.json`, in the layout the Python, Node and Go bindings share. A different
+process — or a different machine, given a shared backend — restores it from
+those files alone.
+
+```rust
+use chdb_rust::durable::{Namespace, OpenOptions};
+use chdb_rust::format::OutputFormat;
+
+let namespace = Namespace::new("file:///var/lib/chdb-durable")?.with_owner("worker-1");
+let (object, existed) = namespace.open("tenant-123", OpenOptions {
+    database: Some("mem".to_string()),
+    ..OpenOptions::default()
+})?;
+
+if !existed {
+    object.execute("CREATE TABLE events (id UInt64) ENGINE = MergeTree ORDER BY id")?;
+}
+let ticket = object.execute("INSERT INTO events VALUES (1)")?;
+object.flush_through(ticket)?;   // now it survives losing this machine
+let rows = object.query("SELECT count() FROM events", OutputFormat::CSV)?;
+object.checkpoint()?;            // fold base + WAL into a fresh base
+object.close()?;                 // flush, release the lease, reclaim the scratch
+```
+
+Four things to know before using it:
+
+- **`execute` is not a durability barrier.** It runs the statement locally and
+  buffers it; `flush` (or `flush_through` for one statement) is what publishes
+  it. A service that answers a client before flushing is choosing to lose that
+  write on a crash.
+- **Replay re-executes your SQL.** Log literals — compute a timestamp or an id
+  in the caller — not `now()`, `rand()`, `generateUUIDv4()` or an
+  `INSERT ... SELECT` from a volatile source.
+- **One object per process.** chdb-core binds one data path per process, so
+  opening a second object returns an error naming both paths. Fan out across
+  worker processes.
+- **The lease is coordination, not security.** Anyone who can write the object's
+  prefix can read, modify or take it; access control is your storage's.
+
+Every `query` and `execute` is put to ClickHouse's own parser first — statement
+count, class, write targets, embedded credentials — and the answer is the gate.
+The same three engine entry points are available directly, without the feature,
+on any engine that exports them: see
+[`Connection::backup_database`, `restore_database` and `classify_query`](src/admin.rs).
+
+A local directory is the only backend that ships; a cloud provider is plugged in
+by implementing `durable::Backend` and passing it to `Namespace::with_backend`.
+The protocol is specified in [CHDB_DURABLE_V1_CONTRACT.md][contract] in the chdb
+repository, which is the source of truth rather than this implementation.
+
+```bash
+cargo run --features durable --example 09_durable_object
+cargo test --features durable
+```
+
+Needs chdb-core v26.7.2-rc.2 or newer, which is where backup, restore and
+statement analysis were added; an older engine fails the build with a message
+saying so.
+
+[contract]: https://github.com/chdb-io/chdb/blob/main/dev-docs/CHDB_DURABLE_V1_CONTRACT.md
+
 ## Contributing
 
 We welcome contributions! Here's how you can help:

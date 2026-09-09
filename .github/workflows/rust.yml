@@ -55,6 +55,15 @@ jobs:
       run: cargo test -- --test-threads=1
       env:
         RUST_BACKTRACE: full
+    # A second cell of the same matrix rather than a job of its own: the durable
+    # protocol is only as good as the engine underneath it, so it has to be
+    # exercised on every platform the crate claims, against the engine installed
+    # above. The feature is off by default, so nothing else here would compile
+    # it, let alone run it.
+    - name: Run the durable tests
+      run: cargo test --features durable -- --test-threads=1
+      env:
+        RUST_BACKTRACE: full
 
   # Static linking, built and run rather than merely compiled. Until this job
   # existed the only step that enabled the feature was a `clippy --all-features`
