@@ -21,6 +21,22 @@ pub enum Error {
     /// Failed to establish a connection to chDB.
     #[error("Connection failed")]
     ConnectionFailed,
+    /// The engine is already bound to a different data path.
+    ///
+    /// One engine per process serves one storage path. An in-memory connection
+    /// counts as a path of its own, since the engine binds `:memory:` when none
+    /// is given.
+    #[error(
+        "the engine is already open on {active}; chDB serves one data path per \
+         process, so {requested} cannot be opened until every connection to \
+         {active} is closed"
+    )]
+    PathConflict {
+        /// The path the engine is bound to.
+        active: String,
+        /// The path that was asked for.
+        requested: String,
+    },
     /// Invalid data was encountered.
     #[error("Invalid data: {0}")]
     InvalidData(String),

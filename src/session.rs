@@ -3,7 +3,7 @@
 //! This module provides the [`Session`] and [`SessionBuilder`] types for managing
 //! persistent database connections with automatic cleanup.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 #[cfg(feature = "arrow")]
@@ -92,10 +92,11 @@ pub struct SessionBuilder<'a> {
 /// ```
 #[derive(Debug)]
 pub struct Session {
-    conn: Connection,
+    /// An `Option` so that [`Drop`] can release the connection before removing
+    /// the directory it was using.
+    conn: Option<Connection>,
     data_path: PathBuf,
     default_format: OutputFormat,
-    auto_cleanup: bool,
 }
 
 impl<'a> SessionBuilder<'a> {
@@ -265,20 +266,28 @@ impl<'a> SessionBuilder<'a> {
         }
         fs::remove_file(&probe_path).ok(); // best-effort cleanup of write probe
 
-        let data_path = self.data_path.to_str().ok_or(Error::PathError)?;
-        let path_arg = format!("--path={data_path}");
+        // The engine compares path strings verbatim, so spellings converge
+        // before it sees them: "db", "./db" and "db/" reach it as one string
+        // and share an engine. Only the argument is canonical; data_path stays
+        // as given, so cleanup removes what the caller named rather than what a
+        // symlink pointed at.
+        let canonical = self.data_path.canonicalize()?;
+        let canonical = canonical.to_str().ok_or(Error::PathError)?;
+        let path_arg = format!("--path={canonical}");
         let owned: Vec<String> = self.arguments.iter().map(|a| a.to_string()).collect();
         let mut args: Vec<&str> = Vec::with_capacity(1 + owned.len());
         args.push(&path_arg);
         args.extend(owned.iter().map(String::as_str));
 
-        let conn = Connection::open(&args)?;
+        let mut conn = Connection::open(&args)?;
+        if self.auto_cleanup {
+            conn.remove_dir_on_last(self.data_path.clone());
+        }
 
         Ok(Session {
-            conn,
+            conn: Some(conn),
             data_path: self.data_path,
             default_format: self.default_format,
-            auto_cleanup: self.auto_cleanup,
         })
     }
 }
@@ -342,12 +351,33 @@ impl Session {
     /// - The query execution fails for any other reason
     pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
         let fmt = extract_output_format(query_args, self.default_format);
-        self.conn.query(query, fmt)
+        self.connection().query(query, fmt)
     }
 
     /// Access the session's [`Connection`] for Arrow registration and low-level queries.
     pub fn connection(&self) -> &Connection {
-        &self.conn
+        self.conn
+            .as_ref()
+            .expect("a session holds its connection until it is dropped")
+    }
+
+    /// The data path this session is on, as it was given.
+    pub fn path(&self) -> &Path {
+        &self.data_path
+    }
+
+    /// Closes this session and removes its data directory, whether or not
+    /// [`SessionBuilder::with_auto_cleanup`] was set, and only once this is the
+    /// last handle on the path.
+    ///
+    /// Removal is best effort, as it is on drop: it happens while the engine
+    /// record is locked, so there is no error to hand back.
+    pub fn cleanup(mut self) {
+        let dir = self.data_path.clone();
+        if let Some(conn) = self.conn.as_mut() {
+            conn.remove_dir_on_last(dir);
+        }
+        drop(self.conn.take());
     }
 
     /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
@@ -408,9 +438,12 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        if self.auto_cleanup {
-            fs::remove_dir_all(&self.data_path).ok();
-        }
+        // Releasing the connection is the whole teardown. Whether this was the
+        // last handle, and so whether the directory goes, is decided while the
+        // engine record is locked; deciding it here would race both a fresh
+        // connection on the same path and another session releasing at the same
+        // moment.
+        drop(self.conn.take());
     }
 }
 

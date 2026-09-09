@@ -175,6 +175,60 @@ engine's own debug information is already gone before it reaches you — chdb-co
 strips the archive when it builds it — so what is left is the symbol table of
 the final link, which is why only the final link can drop it.
 
+## Sessions
+
+chDB embeds one engine per process, serving one data path. Any number of
+sessions may be open on that path at once and they query concurrently, sharing
+one database. A session on a *different* path is refused until every existing
+session and connection is closed.
+
+An in-memory connection is a data path of its own, since the engine binds
+`:memory:` when none is given. So `execute`, which opens one, fails while a
+session is open, and the reverse also holds. Both report `Error::PathConflict`,
+naming the path the engine is on and the one that was asked for.
+`active_engine_path()` and `active_engine_refs()` report the same two facts.
+
+### Concurrency
+
+Give each thread its own session. A connection is `Send`, so a session can be
+moved to the thread that will use it:
+
+```rust
+let readers: Vec<_> = (0..4)
+    .map(|_| {
+        let path = path.clone();
+        std::thread::spawn(move || {
+            let session = SessionBuilder::new().with_data_path(&path).build()?;
+            session.execute("SELECT count() FROM t", None)
+        })
+    })
+    .collect();
+```
+
+A single session is not shared between threads: a connection is `Send` but not
+`Sync`. `chdb_query` is thread-safe, but the Arrow registration calls a session
+also makes say nothing about concurrent use.
+
+### Cleaning Up
+
+`SessionBuilder::with_auto_cleanup(true)` removes the data directory when the
+session is dropped, but only when it is the last handle on that path: a session
+with a sibling still open removes nothing.
+
+So one rule: **if you use `with_auto_cleanup`, set it on every session you open
+on that path.** A mixture leaves the outcome to drop order, since the session
+holding the flag may not be the one that closes last:
+
+```rust
+let a = SessionBuilder::new().with_data_path(&dir).with_auto_cleanup(true).build()?;
+let b = SessionBuilder::new().with_data_path(&dir).build()?;  // no flag
+drop(a);  // not the last handle, so nothing is removed
+drop(b);  // the last handle, but no flag, so nothing is removed
+```
+
+`Session::cleanup()` is the deterministic form: it removes the directory
+whether or not the flag was set, and still only as the last handle.
+
 ## Which Engine Is Linked
 
 Three accessors, each reporting exactly one versioning scheme. A chdb-core
