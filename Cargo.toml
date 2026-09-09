@@ -106,6 +106,12 @@ required-features = ["durable"]
 #
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.
+#
+# Release gate: this crate does not publish against a release candidate. The pin
+# moves to v26.7.3 — the first stable release carrying the Durable V1 ABI — and
+# the test matrix runs again before anything goes to crates.io. Until then rc.2
+# is what local builds and CI test against, since it is where backup, restore
+# and statement analysis first appeared.
 engine = "v26.7.2-rc.2"
 
 [package.metadata.docs.rs]
