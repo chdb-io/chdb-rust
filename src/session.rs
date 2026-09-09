@@ -3,7 +3,7 @@
 //! This module provides the [`Session`] and [`SessionBuilder`] types for managing
 //! persistent database connections with automatic cleanup.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 #[cfg(feature = "arrow")]
@@ -23,6 +23,7 @@ use crate::connection::Connection;
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
+use crate::registry;
 
 /// Builder for creating [`Session`] instances.
 ///
@@ -92,7 +93,9 @@ pub struct SessionBuilder<'a> {
 /// ```
 #[derive(Debug)]
 pub struct Session {
-    conn: Connection,
+    /// An `Option` so that [`Drop`] can release the connection before removing
+    /// the directory it was using.
+    conn: Option<Connection>,
     data_path: PathBuf,
     default_format: OutputFormat,
     auto_cleanup: bool,
@@ -265,6 +268,10 @@ impl<'a> SessionBuilder<'a> {
         }
         fs::remove_file(&probe_path).ok(); // best-effort cleanup of write probe
 
+        // The engine compares path strings verbatim, so spellings converge
+        // here: "db", "./db" and "db/" reach it as one string and share an
+        // engine. The directory exists by now.
+        self.data_path = self.data_path.canonicalize()?;
         let data_path = self.data_path.to_str().ok_or(Error::PathError)?;
         let path_arg = format!("--path={data_path}");
         let owned: Vec<String> = self.arguments.iter().map(|a| a.to_string()).collect();
@@ -275,7 +282,7 @@ impl<'a> SessionBuilder<'a> {
         let conn = Connection::open(&args)?;
 
         Ok(Session {
-            conn,
+            conn: Some(conn),
             data_path: self.data_path,
             default_format: self.default_format,
             auto_cleanup: self.auto_cleanup,
@@ -342,12 +349,36 @@ impl Session {
     /// - The query execution fails for any other reason
     pub fn execute(&self, query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
         let fmt = extract_output_format(query_args, self.default_format);
-        self.conn.query(query, fmt)
+        self.connection().query(query, fmt)
     }
 
     /// Access the session's [`Connection`] for Arrow registration and low-level queries.
     pub fn connection(&self) -> &Connection {
-        &self.conn
+        self.conn
+            .as_ref()
+            .expect("a session holds its connection until it is dropped")
+    }
+
+    /// The canonical data path this session is on.
+    pub fn path(&self) -> &Path {
+        &self.data_path
+    }
+
+    /// Closes this session and removes its data directory, whether or not
+    /// [`SessionBuilder::with_auto_cleanup`] was set, and only when this is the
+    /// last handle on the path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if the directory could not be removed. A session
+    /// that is not the last handle removes nothing and returns `Ok`.
+    pub fn cleanup(mut self) -> Result<()> {
+        let last = registry::refs() == 1;
+        drop(self.conn.take());
+        if last {
+            fs::remove_dir_all(&self.data_path)?;
+        }
+        Ok(())
     }
 
     /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
@@ -408,7 +439,16 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        if self.auto_cleanup {
+        // Asked while this session still counts.
+        let last = registry::refs() == 1;
+
+        // Released before the directory goes, not while the engine is still
+        // writing to it.
+        drop(self.conn.take());
+
+        // A session that is not the last one leaves the directory alone, rather
+        // than taking the data out from under its siblings.
+        if self.auto_cleanup && last {
             fs::remove_dir_all(&self.data_path).ok();
         }
     }

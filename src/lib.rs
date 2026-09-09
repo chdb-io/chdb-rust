@@ -71,6 +71,7 @@ pub mod error;
 pub mod format;
 pub mod log_level;
 pub mod query_result;
+pub(crate) mod registry;
 pub mod session;
 pub mod version;
 
@@ -126,8 +127,23 @@ pub(crate) const CHDB_PROGRAM_NAME: &str = "clickhouse";
 /// - The query syntax is invalid
 /// - The connection cannot be established
 /// - The query execution fails
+/// - A connection is already open on a data path, since the in-memory
+///   connection this opens would be a second one. See
+///   [`Error::PathConflict`](error::Error::PathConflict).
 pub fn execute(query: &str, query_args: Option<&[Arg]>) -> Result<QueryResult> {
     let conn = Connection::open_in_memory()?;
     let fmt = extract_output_format(query_args, OutputFormat::TabSeparated);
     conn.query(query, fmt)
+}
+
+/// The data path the embedded engine is bound to, or `None` when no connection
+/// is open. `:memory:` for an in-memory engine, a directory otherwise.
+pub fn active_engine_path() -> Option<String> {
+    registry::active_path()
+}
+
+/// How many open connections are holding the embedded engine. Zero means the
+/// next connection may bind any path.
+pub fn active_engine_refs() -> usize {
+    registry::refs()
 }

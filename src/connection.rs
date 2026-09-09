@@ -11,7 +11,7 @@ use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 use crate::query_result::QueryResult;
-use crate::{bindings, CHDB_PROGRAM_NAME};
+use crate::{bindings, registry, CHDB_PROGRAM_NAME};
 
 /// A connection to a chDB database.
 ///
@@ -43,6 +43,9 @@ use crate::{bindings, CHDB_PROGRAM_NAME};
 pub struct Connection {
     // Pointer to chdb_connection (which is *mut chdb_connection_)
     inner: *mut bindings::chdb_connection,
+    /// Holds this connection's claim on the process-wide engine. Dropping it
+    /// is what lets a later connection bind a different data path.
+    _slot: registry::Slot,
 }
 
 // Safety: Connection is safe to send between threads
@@ -79,6 +82,11 @@ impl Connection {
             .map(CString::new)
             .collect::<std::result::Result<_, _>>()?;
 
+        // Claimed before connecting, so that a second data path is refused with
+        // the reason rather than by the engine, which reports a refusal as a
+        // null connection and nothing else.
+        let slot = registry::acquire(registry::key_from_args(args))?;
+
         let argv: Vec<*const c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
         let conn_ptr =
             unsafe { bindings::chdb_connect(argv.len() as i32, argv.as_ptr() as *mut *mut c_char) };
@@ -93,7 +101,10 @@ impl Connection {
             return Err(Error::ConnectionFailed);
         }
 
-        Ok(Self { inner: conn_ptr })
+        Ok(Self {
+            inner: conn_ptr,
+            _slot: slot,
+        })
     }
 
     /// Connect to an in-memory database.
