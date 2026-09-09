@@ -28,6 +28,7 @@
 //! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //! - **Version accessors** ([`version`]): which chdb-core release is linked, where it came from, and which ClickHouse it carries
+//! - **Backup, restore and statement analysis** ([`admin`]): the chdb-core management ABI, on any engine that exports it
 //!
 //! ## Examples
 //!
@@ -38,6 +39,8 @@
 //! This crate uses `unsafe` code to interface with the C library, but provides a safe Rust API.
 //! All public functions are safe to call, and the crate ensures proper resource cleanup.
 
+#[cfg(has_durable_abi)]
+pub mod admin;
 pub mod arg;
 #[cfg(feature = "arrow")]
 pub mod arrow_insert;

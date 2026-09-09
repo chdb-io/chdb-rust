@@ -11,6 +11,7 @@ const CHDB_ENGINE_PIN: &str = "v26.7.2-rc.2";
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(direct_arrow_insert)");
     println!("cargo::rustc-check-cfg=cfg(has_chdb_version)");
+    println!("cargo::rustc-check-cfg=cfg(has_durable_abi)");
 
     if env::var("DOCS_RS").is_ok() {
         // docs.rs links no engine, but the version accessors still have to
@@ -614,6 +615,16 @@ fn isolate_archive(lib_path: &Path, out_dir: &Path) -> Option<PathBuf> {
     Some(dir)
 }
 
+/// The three entry points the Durable V1 contract requires of chdb-core: a
+/// database backup, a database restore, and a statement analysis a caller can
+/// gate writes on. They arrived together in v26.7.2-rc.2, and `src/admin.rs`
+/// binds them.
+const DURABLE_ABI: [&str; 3] = [
+    "chdb_backup_database_n",
+    "chdb_restore_database_n",
+    "chdb_classify_query_n",
+];
+
 fn setup_link_paths(lib_path: &Path, header_path: &Path, out_dir: &Path) {
     let lib_dir = lib_path.parent().unwrap_or(Path::new("."));
 
@@ -656,6 +667,17 @@ fn setup_link_paths(lib_path: &Path, header_path: &Path, out_dir: &Path) {
     // not link, so the accessor is compiled out instead.
     if header_declares(header_path, "chdb_version") {
         println!("cargo:rustc-cfg=has_chdb_version");
+    }
+
+    // Backup, restore and query analysis arrived together in chdb-core
+    // v26.7.2-rc.2, as the Durable V1 ABI. All three are gated on one cfg
+    // because the durable protocol needs all three: an engine carrying only
+    // some of them cannot serve an object either way.
+    if DURABLE_ABI
+        .iter()
+        .all(|symbol| header_declares(header_path, symbol))
+    {
+        println!("cargo:rustc-cfg=has_durable_abi");
     }
 
     println!("cargo:rerun-if-changed=wrapper.h");

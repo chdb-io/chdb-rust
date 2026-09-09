@@ -471,6 +471,16 @@ fn check_insert_result(result_ptr: *mut bindings::chdb_result) -> Result<()> {
 }
 
 impl Connection {
+    /// The engine handle behind this connection, for the FFI calls in sibling
+    /// modules. `chdb_connect` hands back a pointer to the handle, and every
+    /// entry point takes the handle itself.
+    pub(crate) fn raw(&self) -> bindings::chdb_connection {
+        // SAFETY: `inner` is non-null for the lifetime of a Connection —
+        // `open` returns an error rather than a handle when either the outer
+        // or the inner pointer is null.
+        unsafe { *self.inner }
+    }
+
     /// Removes `dir` once this is the last connection on its data path.
     ///
     /// The removal happens while the engine record is locked, so a connection
