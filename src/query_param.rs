@@ -696,7 +696,10 @@ mod tests {
             let value_lens = encoded.value_lens_ptr();
 
             assert_eq!(*name_lens, 1);
-            assert_eq!(std::slice::from_raw_parts(*names as *const u8, *name_lens), b"x");
+            assert_eq!(
+                std::slice::from_raw_parts(*names as *const u8, *name_lens),
+                b"x"
+            );
             assert_eq!(*name_lens.add(1), 5);
             assert_eq!(
                 std::slice::from_raw_parts(*names.add(1) as *const u8, *name_lens.add(1)),
