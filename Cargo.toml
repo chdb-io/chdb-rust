@@ -45,6 +45,7 @@ tar = "0.4"
 
 [dev-dependencies]
 arrow = { version = "59", features = ["ffi", "prettyprint", "ipc_compression"] }
+libc = "0.2"
 tempdir = "0.3.7"
 tempfile = "3"
 
@@ -66,6 +67,16 @@ required-features = ["arrow"]
 [[example]]
 name = "12_arrow_query_stream"
 required-features = ["arrow"]
+
+[[example]]
+name = "14_insert_stream"
+
+[[example]]
+name = "15_arrow_query"
+required-features = ["arrow"]
+
+[[example]]
+name = "16_runtime"
 
 [[test]]
 name = "arrow_insert"
@@ -101,6 +112,16 @@ required-features = ["durable"]
 [[test]]
 name = "durable_s3"
 required-features = ["durable-s3"]
+
+[[test]]
+# Imports execute_stream_arrow_with_params, which is #[cfg(feature = "arrow")].
+# Without this gate `cargo test --no-default-features` fails to compile.
+name = "query_with_params"
+required-features = ["arrow"]
+
+[[test]]
+name = "arrow_query"
+required-features = ["arrow"]
 
 [package.metadata.chdb]
 # The chdb-core release this crate builds against. This is a chdb-core release

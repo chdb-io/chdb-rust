@@ -312,7 +312,7 @@ mod arrow_stream {
     fn stream_arrow_with_params_returns_bound_scalar() -> Result<()> {
         let mut conn = Connection::open_in_memory()?;
         let mut stream =
-            conn.query_stream_arrow_with_params("SELECT {x:UInt64} AS v", [("x", 11_u64)])?;
+            conn.query_stream_arrow_with_params("SELECT {x:UInt64} AS v", [("x", 11_u64)], None)?;
 
         let batch = stream.next_batch()?.expect("expected a batch");
         assert_eq!(batch.num_rows(), 1);
@@ -333,6 +333,7 @@ mod arrow_stream {
         let mut stream = conn.query_stream_arrow_with_params(
             "SELECT number FROM numbers({n:UInt64})",
             [("n", 5_u64)],
+            None,
         )?;
 
         let mut rows = 0_usize;
@@ -348,7 +349,7 @@ mod arrow_stream {
     fn stream_arrow_missing_param_returns_substitution_error() {
         let mut conn = Connection::open_in_memory().expect("connection");
         let mut stream = conn
-            .query_stream_arrow_with_params("SELECT {x:UInt64} AS v", QueryParams::new())
+            .query_stream_arrow_with_params("SELECT {x:UInt64} AS v", QueryParams::new(), None)
             .expect("stream start succeeds; bind error arrives on fetch");
         let err = stream.next_batch().unwrap_err();
         assert!(matches!(err, Error::QueryError(msg) if msg.contains("Substitution")));
@@ -379,6 +380,7 @@ mod arrow_stream {
         let mut stream = session.execute_stream_arrow_with_params(
             "SELECT id FROM items WHERE id >= {min_id:UInt64}",
             [("min_id", 2_u64)],
+            None,
         )?;
 
         let mut rows = 0_usize;

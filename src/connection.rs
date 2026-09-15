@@ -4,6 +4,8 @@
 
 use std::ffi::{c_char, CString};
 
+#[cfg(feature = "arrow")]
+use crate::arrow_options::ArrowOptions;
 #[cfg(all(feature = "arrow", direct_arrow_insert))]
 use crate::arrow_options::InsertOptions;
 #[cfg(feature = "arrow")]
@@ -11,8 +13,8 @@ use crate::arrow_query_stream::ArrowQueryStream;
 #[cfg(feature = "arrow")]
 use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
-use crate::format::OutputFormat;
-use crate::query_param::{EncodedParams, QueryParam};
+use crate::format::{InputFormat, OutputFormat};
+use crate::query_param::{EncodedParams, QueryParams};
 use crate::query_result::QueryResult;
 use crate::query_stream::QueryStream;
 use crate::{bindings, registry, CHDB_PROGRAM_NAME};
@@ -81,6 +83,10 @@ impl Connection {
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
     pub fn open(args: &[&str]) -> Result<Self> {
+        // A post-shutdown connect fails inside the engine as a null connection
+        // and nothing else, so it is caught here where the reason is known.
+        crate::runtime::ensure_running()?;
+
         let c_args: Vec<CString> = std::iter::once(CHDB_PROGRAM_NAME)
             .chain(args.iter().copied())
             .map(CString::new)
@@ -207,13 +213,23 @@ impl Connection {
     /// - The query references non-existent tables or columns
     /// - The query execution fails for any other reason
     pub fn query(&self, sql: &str, format: OutputFormat) -> Result<QueryResult> {
-        let query_cstr = CString::new(sql)?;
-        let format_cstr = CString::new(format.as_str())?;
-
-        // chdb_query takes chdb_connection (which is *mut chdb_connection_)
         let conn = unsafe { *self.inner };
-        let result_ptr =
-            unsafe { bindings::chdb_query(conn, query_cstr.as_ptr(), format_cstr.as_ptr()) };
+        let format = format.as_str();
+
+        // chdb_query_n takes pointer + length for both strings, so neither has
+        // to be NUL-terminated and neither is copied. It returns an owned
+        // chdb_result handle (or null on failure): QueryResult::new below takes
+        // ownership of that pointer, and QueryResult's Drop impl frees it via
+        // chdb_destroy_query_result.
+        let result_ptr = unsafe {
+            bindings::chdb_query_n(
+                conn,
+                sql.as_ptr() as *const c_char,
+                sql.len(),
+                format.as_ptr() as *const c_char,
+                format.len(),
+            )
+        };
 
         if result_ptr.is_null() {
             return Err(Error::NoResult);
@@ -302,17 +318,12 @@ impl Connection {
     /// Returns an error if:
     /// - The query syntax is invalid
     /// - The query cannot be started
-    pub fn query_stream_with_params<'a, K, V, I>(
+    pub fn query_stream_with_params<'a>(
         &'a mut self,
         sql: &str,
         format: OutputFormat,
-        params: I,
-    ) -> Result<QueryStream<'a>>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
+        params: impl Into<QueryParams>,
+    ) -> Result<QueryStream<'a>> {
         QueryStream::start_borrowed_with_params(self, sql, format, params)
     }
 
@@ -341,7 +352,149 @@ impl Connection {
         &'a mut self,
         sql: &str,
     ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'a>> {
-        crate::arrow_query_stream::ArrowQueryStream::start_borrowed(self, sql)
+        crate::arrow_query_stream::ArrowQueryStream::start_borrowed(self, sql, None)
+    }
+
+    /// Execute a query and take the whole result as one Arrow stream.
+    ///
+    /// Zero-copy where the engine can manage it: no IPC serialization and no
+    /// compression round-trip. Prefer
+    /// [`query_stream_arrow`](Self::query_stream_arrow) when the result is too
+    /// large to hold at once.
+    ///
+    /// The returned reader owns the Arrow stream. The C ABI transfers
+    /// `out_stream->release` to the caller, so the reader can be drained after
+    /// this connection is dropped.
+    ///
+    /// Available when the crate is built with the `arrow` feature.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    ///
+    /// let conn = Connection::open_in_memory()?;
+    /// let reader = conn.query_arrow("SELECT number FROM numbers(1000)")?;
+    /// for batch in reader {
+    ///     println!("rows: {}", batch?.num_rows());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[cfg(feature = "arrow")]
+    pub fn query_arrow(&self, sql: &str) -> Result<crate::arrow_query_stream::ArrowReader> {
+        self.query_arrow_inner(sql, None)
+    }
+
+    /// [`query_arrow`](Self::query_arrow) with explicit type-mapping options.
+    #[cfg(feature = "arrow")]
+    pub fn query_arrow_with_opts(
+        &self,
+        sql: &str,
+        opts: &ArrowOptions,
+    ) -> Result<crate::arrow_query_stream::ArrowReader> {
+        self.query_arrow_inner(sql, Some(opts))
+    }
+
+    #[cfg(feature = "arrow")]
+    fn query_arrow_inner(
+        &self,
+        sql: &str,
+        opts: Option<&ArrowOptions>,
+    ) -> Result<crate::arrow_query_stream::ArrowReader> {
+        use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
+
+        let conn = unsafe { *self.inner };
+        let c_opts = opts.map(|o| o.to_c());
+        let opts_ptr = c_opts.as_ref().map_or(std::ptr::null(), |o| {
+            o as *const bindings::chdb_arrow_options
+        });
+
+        let mut ffi_stream = FFI_ArrowArrayStream::empty();
+
+        // Wraps chdb_query_arrow_n. The engine fills `ffi_stream` and transfers
+        // ownership of its release callback; the returned chdb_result carries
+        // only metrics and an error slot, and is destroyed here.
+        let result_ptr = unsafe {
+            bindings::chdb_query_arrow_n(
+                conn,
+                sql.as_ptr() as *const c_char,
+                sql.len(),
+                (&mut ffi_stream as *mut FFI_ArrowArrayStream).cast(),
+                opts_ptr,
+            )
+        };
+
+        if result_ptr.is_null() {
+            return Err(Error::NoResult);
+        }
+        // Freed when it drops; the data lives in `ffi_stream`, not in it.
+        QueryResult::new(result_ptr).check_error()?;
+
+        let reader = ArrowArrayStreamReader::try_new(ffi_stream)
+            .map_err(|e| Error::InvalidData(e.to_string()))?;
+        Ok(crate::arrow_query_stream::ArrowReader::new(reader))
+    }
+
+    /// Stream a query's result as Arrow record batches with explicit
+    /// type-mapping options.
+    #[cfg(feature = "arrow")]
+    pub fn query_stream_arrow_with_opts<'a>(
+        &'a mut self,
+        sql: &str,
+        opts: &ArrowOptions,
+    ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'a>> {
+        crate::arrow_query_stream::ArrowQueryStream::start_borrowed(self, sql, Some(opts))
+    }
+
+    /// Open a streaming INSERT.
+    ///
+    /// The write-side counterpart of [`query_stream`](Self::query_stream): send
+    /// the INSERT statement here, then push the rows in chunks. The statement
+    /// must carry no `FORMAT` clause and no inline data — the format is the
+    /// `format` argument, and the data goes through
+    /// [`InsertStream::append`](crate::insert_stream::InsertStream::append).
+    ///
+    /// The connection is exclusively borrowed until the stream is finished,
+    /// cancelled or dropped, because it accepts no other statement meanwhile.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::format::InputFormat;
+    ///
+    /// let mut conn = Connection::open_in_memory()?;
+    /// let mut ins = conn.insert_stream("INSERT INTO t (a, b)", InputFormat::CSV)?;
+    /// ins.append(b"1,\"one\"\n")?;
+    /// let stats = ins.finish()?;
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::QueryError`] if the statement is invalid — a missing
+    /// table, say — which is reported when the stream is opened.
+    pub fn insert_stream<'a>(
+        &'a mut self,
+        sql: &str,
+        format: InputFormat,
+    ) -> Result<crate::insert_stream::InsertStream<'a>> {
+        crate::insert_stream::InsertStream::start(self, sql, format)
+    }
+
+    /// Open a streaming INSERT whose statement carries `{name:Type}`
+    /// placeholders.
+    ///
+    /// The motivating case is `INSERT INTO FUNCTION file({path:String}, ...)`,
+    /// where the destination itself is a bound value. See
+    /// [`query_with_params`](Self::query_with_params) for binding rules.
+    pub fn insert_stream_with_params<'a>(
+        &'a mut self,
+        sql: &str,
+        format: InputFormat,
+        params: impl Into<QueryParams>,
+    ) -> Result<crate::insert_stream::InsertStream<'a>> {
+        crate::insert_stream::InsertStream::start_with_params(self, sql, format, params)
     }
 
     /// Execute a query with ClickHouse `{name:Type}` parameter binding.
@@ -372,38 +525,32 @@ impl Connection {
     /// - A `{name:Type}` placeholder has no matching param
     /// - A value cannot be parsed as the type declared in the placeholder
     /// - The query execution fails for any other reason
-    pub fn query_with_params<K, V, I>(
+    pub fn query_with_params(
         &self,
         sql: &str,
         format: OutputFormat,
-        params: I,
-    ) -> Result<QueryResult>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
-        let query_cstr = CString::new(sql)?;
-        let format_cstr = CString::new(format.as_str())?;
+        params: impl Into<QueryParams>,
+    ) -> Result<QueryResult> {
+        let format = format.as_str();
         let encoded = EncodedParams::encode(params)?;
 
-        // SAFETY:
-        // - `self.inner` is non-null and points at a live `chdb_connection` for the
-        //   lifetime of `self` (set in `Connection::open`, freed only in `Drop`).
-        // - `query_cstr` and `format_cstr` are NUL-terminated and outlive this call.
-        // - `encoded` owns the name/value `CString`s; `names_ptr`/`values_ptr` alias
-        //   those buffers for the duration of the call. libchdb may read them only
-        //   during this call and must not retain the pointers afterward.
-        // - When `encoded.len() == 0`, both pointer args are null, which the C API
-        //   accepts for an empty parameter list.
+        // chdb_query_with_params_n takes pointer + length for query, format, and
+        // each bound value, so none of them need to be NUL-terminated. It returns
+        // an owned chdb_result handle (or null on failure): QueryResult::new below
+        // takes ownership, and QueryResult's Drop impl frees it via
+        // chdb_destroy_query_result.
         let conn = unsafe { *self.inner };
         let result_ptr = unsafe {
-            bindings::chdb_query_with_params(
+            bindings::chdb_query_with_params_n(
                 conn,
-                query_cstr.as_ptr(),
-                format_cstr.as_ptr(),
+                sql.as_ptr() as *const c_char,
+                sql.len(),
+                format.as_ptr() as *const c_char,
+                format.len(),
                 encoded.names_ptr(),
+                encoded.name_lens_ptr(),
                 encoded.values_ptr(),
+                encoded.value_lens_ptr(),
                 encoded.len(),
             )
         };
@@ -434,6 +581,7 @@ impl Connection {
     /// let mut stream = conn.query_stream_arrow_with_params(
     ///     "SELECT {x:UInt64} AS v",
     ///     [("x", 11_u64)],
+    ///     None,
     /// )?;
     /// while let Some(batch) = stream.next_batch()? {
     ///     println!("rows: {}", batch.num_rows());
@@ -446,17 +594,16 @@ impl Connection {
     /// Returns an error if:
     /// - The query syntax is invalid
     /// - The query cannot be started
-    pub fn query_stream_arrow_with_params<'a, K, V, I>(
+    ///
+    /// Pass `opts` to control Arrow type mapping alongside the bindings; `None`
+    /// selects the engine's default contract.
+    pub fn query_stream_arrow_with_params<'a>(
         &'a mut self,
         sql: &str,
-        params: I,
-    ) -> Result<ArrowQueryStream<'a>>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
-        ArrowQueryStream::start_borrowed_with_params(self, sql, params)
+        params: impl Into<QueryParams>,
+        opts: Option<&ArrowOptions>,
+    ) -> Result<ArrowQueryStream<'a>> {
+        ArrowQueryStream::start_borrowed_with_params(self, sql, params, opts)
     }
 
     #[cfg(feature = "arrow")]

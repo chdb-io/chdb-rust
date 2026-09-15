@@ -125,6 +125,35 @@ fn cases() -> Vec<Case> {
             expect: "first=1|second=2\n",
             run: exit_after_close,
         },
+        // --- Group 5: process lifecycle ------------------------------------
+        // Signal handlers are re-installed at the start of every query, not
+        // once at engine start, so the preference can be set at any time —
+        // but only if disabling also resets what is already installed.
+        Case {
+            name: "signal_handlers_before_connect",
+            expect: "ok\n",
+            run: signal_handlers_before_connect,
+        },
+        Case {
+            name: "disabling_after_connect_takes_effect",
+            expect: "ok\n",
+            run: disabling_after_connect_takes_effect,
+        },
+        Case {
+            name: "reset_signal_handlers_restores_default",
+            expect: "ok\n",
+            run: reset_signal_handlers_restores_default,
+        },
+        Case {
+            name: "shutdown_refuses_while_a_connection_is_open",
+            expect: "refused|ok\n",
+            run: shutdown_refuses_while_a_connection_is_open,
+        },
+        Case {
+            name: "connect_after_shutdown_is_refused",
+            expect: "shutdown|refused|idempotent\n",
+            run: connect_after_shutdown_is_refused,
+        },
     ];
 
     // The release callback in the Arrow C Data Interface frees memory that was
@@ -446,6 +475,128 @@ fn arrow_release_callback() {
 
     let sum = scalar_row_on(session.connection(), "SELECT sum(x) FROM d.t");
     println!("inserted={rows}|sum={sum}|released");
+}
+
+/// Disabling handlers before any connection is the cleanest order: no query
+/// ever runs with them installed.
+fn signal_handlers_before_connect() {
+    chdb_rust::runtime::signal_handlers(false);
+    let conn = Connection::open_in_memory().expect("open");
+    let result = conn
+        .query("SELECT 1", OutputFormat::TabSeparated)
+        .expect("query");
+    assert_eq!(result.data_utf8_lossy().trim(), "1");
+    println!("ok");
+}
+
+/// The deadly-signal disposition for `sig`, read via `sigaction` with a null
+/// `act` — a query, not a change.
+fn signal_disposition(sig: libc::c_int) -> libc::sighandler_t {
+    let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+    // Wraps sigaction(2). A null `act` with a non-null `oldact` only reads
+    // the current disposition; it changes nothing.
+    let rc = unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) };
+    assert_eq!(
+        rc,
+        0,
+        "sigaction query failed: {}",
+        std::io::Error::last_os_error()
+    );
+    old.sa_sigaction
+}
+
+/// Handlers are re-installed at the start of every query (not once at engine
+/// start), so disabling them has to both reset what chDB already installed
+/// and stick for the queries that follow. The second disposition check after
+/// another query is the one that would catch a disable that did not stick.
+fn disabling_after_connect_takes_effect() {
+    let conn = Connection::open_in_memory().expect("open");
+    // A trivial query so the engine installs its deadly-signal handlers.
+    let _ = scalar_row_on(&conn, "SELECT 1");
+
+    chdb_rust::runtime::signal_handlers(false);
+    assert_eq!(
+        signal_disposition(libc::SIGSEGV),
+        libc::SIG_DFL,
+        "disabling should reset the handler chDB just installed"
+    );
+
+    // One more query: if the disable flag did not stick, this re-installs
+    // the handler and the disposition below would no longer be SIG_DFL.
+    let result = scalar_row_on(&conn, "SELECT 2");
+    assert_eq!(result, "2");
+    assert_eq!(
+        signal_disposition(libc::SIGSEGV),
+        libc::SIG_DFL,
+        "disabling should stay in effect across the next query"
+    );
+
+    println!("ok");
+}
+
+/// `reset_signal_handlers` restores SIG_DFL and does not set the disable flag.
+/// This crate's `Connection` queries go through `chdb_query_n`, which does not
+/// call `setupCommonDeadlySignalHandlers` — that happens once at connect — so
+/// a later query on the same connection must not put the handlers back.
+fn reset_signal_handlers_restores_default() {
+    let conn = Connection::open_in_memory().expect("open");
+    let _ = scalar_row_on(&conn, "SELECT 1");
+    assert_ne!(
+        signal_disposition(libc::SIGSEGV),
+        libc::SIG_DFL,
+        "connect should install chDB's deadly-signal handlers"
+    );
+
+    chdb_rust::runtime::reset_signal_handlers();
+    assert_eq!(
+        signal_disposition(libc::SIGSEGV),
+        libc::SIG_DFL,
+        "reset should restore SIG_DFL"
+    );
+
+    let result = scalar_row_on(&conn, "SELECT 2");
+    assert_eq!(result, "2");
+    assert_eq!(
+        signal_disposition(libc::SIGSEGV),
+        libc::SIG_DFL,
+        "a subsequent query on this connection must not reinstall handlers"
+    );
+
+    println!("ok");
+}
+
+/// Tearing the engine down under a live connection would leave it dangling, so
+/// the engine refuses; the count says how many handles are in the way.
+fn shutdown_refuses_while_a_connection_is_open() {
+    let conn = Connection::open_in_memory().expect("open");
+
+    match chdb_rust::runtime::shutdown() {
+        Err(Error::ConnectionsStillOpen { count: 1 }) => print!("refused|"),
+        other => panic!("expected ConnectionsStillOpen {{ count: 1 }}, got {other:?}"),
+    }
+
+    drop(conn);
+    chdb_rust::runtime::shutdown().expect("shutdown with nothing open");
+    println!("ok");
+}
+
+/// Shutdown is one-way: the library is closed for the rest of the process, and
+/// a later open says so rather than failing as a null connection.
+fn connect_after_shutdown_is_refused() {
+    let conn = Connection::open_in_memory().expect("open");
+    drop(conn);
+
+    chdb_rust::runtime::shutdown().expect("shutdown");
+    print!("shutdown|");
+
+    match Connection::open_in_memory() {
+        Err(Error::EngineShutDown) => print!("refused|"),
+        other => panic!("expected EngineShutDown, got {other:?}"),
+    }
+
+    // The engine treats a repeat shutdown as success, and so does this.
+    chdb_rust::runtime::shutdown().expect("second shutdown is a no-op");
+    println!("idempotent");
 }
 
 /// A scratch directory named `suffix`, removed if a previous run left one.

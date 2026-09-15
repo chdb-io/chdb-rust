@@ -18,13 +18,14 @@ use crate::arrow_insert::{
     insert_record_batches,
 };
 #[cfg(feature = "arrow")]
-use crate::arrow_options::InsertOptions;
+use crate::arrow_options::{ArrowOptions, InsertOptions};
 #[cfg(feature = "arrow")]
 use crate::arrow_query_stream::ArrowQueryStream;
 use crate::connection::Connection;
 use crate::error::{Error, Result};
-use crate::format::OutputFormat;
-use crate::query_param::QueryParam;
+use crate::format::{InputFormat, OutputFormat};
+use crate::insert_stream::InsertStream;
+use crate::query_param::QueryParams;
 use crate::query_result::QueryResult;
 use crate::query_stream::QueryStream;
 
@@ -454,22 +455,53 @@ impl Session {
     /// Returns an error if:
     /// - The query syntax is invalid
     /// - The query cannot be started
-    pub fn execute_stream_with_params<'a, K, V, I>(
+    pub fn execute_stream_with_params<'a>(
         &'a mut self,
         query: &str,
         query_args: Option<&[Arg]>,
-        params: I,
-    ) -> Result<QueryStream<'a>>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
+        params: impl Into<QueryParams>,
+    ) -> Result<QueryStream<'a>> {
         let fmt = extract_output_format(query_args, self.default_format);
         self.conn
             .as_mut()
             .expect("a session holds its connection until it is dropped")
             .query_stream_with_params(query, fmt, params)
+    }
+
+    /// Open a streaming INSERT on this session's connection.
+    ///
+    /// Session-level counterpart of [`Connection::insert_stream`](crate::connection::Connection::insert_stream).
+    /// The session is exclusively borrowed until the stream is finished, cancelled
+    /// or dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the INSERT statement is invalid when the stream is opened.
+    pub fn insert_stream<'a>(
+        &'a mut self,
+        sql: &str,
+        format: InputFormat,
+    ) -> Result<InsertStream<'a>> {
+        self.conn
+            .as_mut()
+            .expect("a session holds its connection until it is dropped")
+            .insert_stream(sql, format)
+    }
+
+    /// Open a streaming INSERT whose statement carries `{name:Type}` placeholders.
+    ///
+    /// Session-level counterpart of
+    /// [`Connection::insert_stream_with_params`](crate::connection::Connection::insert_stream_with_params).
+    pub fn insert_stream_with_params<'a>(
+        &'a mut self,
+        sql: &str,
+        format: InputFormat,
+        params: impl Into<QueryParams>,
+    ) -> Result<InsertStream<'a>> {
+        self.conn
+            .as_mut()
+            .expect("a session holds its connection until it is dropped")
+            .insert_stream_with_params(sql, format, params)
     }
 
     /// Execute a query with ClickHouse `{name:Type}` parameter binding.
@@ -506,17 +538,12 @@ impl Session {
     /// - A `{name:Type}` placeholder has no matching param
     /// - A value cannot be parsed as the type declared in the placeholder
     /// - The query execution fails for any other reason
-    pub fn execute_with_params<K, V, I>(
+    pub fn execute_with_params(
         &self,
         query: &str,
         query_args: Option<&[Arg]>,
-        params: I,
-    ) -> Result<QueryResult>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
+        params: impl Into<QueryParams>,
+    ) -> Result<QueryResult> {
         let fmt = extract_output_format(query_args, self.default_format);
         self.connection().query_with_params(query, fmt, params)
     }
@@ -525,6 +552,18 @@ impl Session {
     pub fn connection(&self) -> &Connection {
         self.conn
             .as_ref()
+            .expect("a session holds its connection until it is dropped")
+    }
+
+    /// Access the session's [`Connection`] mutably for APIs that exist only on
+    /// [`Connection`] today (for example [`Connection::query_stream_arrow_with_opts`](crate::connection::Connection::query_stream_arrow_with_opts)).
+    ///
+    /// Streaming query and INSERT methods on [`Session`] borrow the connection
+    /// exclusively while a stream is open because chDB accepts no other
+    /// statement on that connection meanwhile.
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        self.conn
+            .as_mut()
             .expect("a session holds its connection until it is dropped")
     }
 
@@ -640,6 +679,7 @@ impl Session {
     /// let mut stream = session.execute_stream_arrow_with_params(
     ///     "SELECT {x:UInt64} AS v",
     ///     [("x", 11_u64)],
+    ///     None,
     /// )?;
     /// while let Some(batch) = stream.next_batch()? {
     ///     println!("rows: {}", batch.num_rows());
@@ -653,20 +693,16 @@ impl Session {
     /// - The query syntax is invalid
     /// - The query cannot be started
     #[cfg(feature = "arrow")]
-    pub fn execute_stream_arrow_with_params<'a, K, V, I>(
+    pub fn execute_stream_arrow_with_params<'a>(
         &'a mut self,
         query: &str,
-        params: I,
-    ) -> Result<ArrowQueryStream<'a>>
-    where
-        K: AsRef<str>,
-        V: Into<QueryParam>,
-        I: IntoIterator<Item = (K, V)>,
-    {
+        params: impl Into<QueryParams>,
+        opts: Option<&ArrowOptions>,
+    ) -> Result<ArrowQueryStream<'a>> {
         self.conn
             .as_mut()
             .expect("a session holds its connection until it is dropped")
-            .query_stream_arrow_with_params(query, params)
+            .query_stream_arrow_with_params(query, params, opts)
     }
 }
 

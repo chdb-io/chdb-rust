@@ -1,4 +1,6 @@
-//! Shared options for Arrow bulk insert paths.
+//! Options for chDB's Arrow paths: the insert-side [`InsertOptions`] (tuning
+//! knobs for `INSERT … SELECT` and direct FFI insert) and the read-side
+//! [`ArrowOptions`] (type-mapping knobs for Arrow export).
 
 /// Tuning knobs appended as `SETTINGS` on the insert `INSERT … SELECT` query,
 /// or passed to direct FFI insert APIs.
@@ -37,6 +39,50 @@ impl InsertOptions {
             None
         } else {
             Some(parts.join(", "))
+        }
+    }
+}
+
+/// How the engine maps ClickHouse types to Arrow types on export.
+///
+/// Distinct from [`InsertOptions`], which tunes the *insert* path — this is the
+/// read side, and it wraps a different C struct (`chdb_arrow_options`).
+///
+/// [`Default`] reproduces the engine's own defaults, so
+/// `ArrowOptions::default()` behaves exactly like passing no options at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArrowOptions {
+    /// Emit types with no faithful Arrow mapping — JSON/Object, Dynamic,
+    /// AggregateFunction — as `Binary` instead of failing. Default `false`,
+    /// meaning the engine throws `UNKNOWN_TYPE` for such columns; `true`
+    /// degrades them to `Binary`.
+    pub unsupported_as_binary: bool,
+    /// Emit `LowCardinality(T)` as an Arrow dictionary array instead of
+    /// materializing it to `T`. Default `false`.
+    ///
+    /// The consumer must be able to handle dictionaries whose values are stable
+    /// across batches.
+    pub low_cardinality_as_dictionary: bool,
+    /// Emit `String` as Arrow `Utf8`. Default `true`; `false` emits `Binary`.
+    pub string_as_string: bool,
+}
+
+impl Default for ArrowOptions {
+    fn default() -> Self {
+        Self {
+            unsupported_as_binary: false,
+            low_cardinality_as_dictionary: false,
+            string_as_string: true,
+        }
+    }
+}
+
+impl ArrowOptions {
+    pub(crate) fn to_c(self) -> crate::bindings::chdb_arrow_options {
+        crate::bindings::chdb_arrow_options {
+            unsupported_as_binary: i32::from(self.unsupported_as_binary),
+            low_cardinality_as_dictionary: i32::from(self.low_cardinality_as_dictionary),
+            string_as_string: i32::from(self.string_as_string),
         }
     }
 }

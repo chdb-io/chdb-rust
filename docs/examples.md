@@ -14,6 +14,9 @@ This document provides simple and easy-to-follow examples for using chdb-rust, a
 8. [Error Handling](#error-handling)
 9. [Fast Bulk Inserts (Arrow)](#fast-bulk-inserts-arrow)
 10. [Durable Objects](#durable-objects)
+11. [Streaming INSERT](#streaming-insert)
+12. [One-Shot Arrow Export](#one-shot-arrow-export)
+13. [Runtime Control](#runtime-control)
 
 ## Basic Setup
 
@@ -556,6 +559,98 @@ handing it to `Namespace::with_backend`.
 See `examples/09_durable_object.rs` for a runnable program, and
 [CHDB_DURABLE_V1_CONTRACT.md](https://github.com/chdb-io/chdb/blob/main/dev-docs/CHDB_DURABLE_V1_CONTRACT.md)
 for the protocol itself, which is the source of truth rather than this crate.
+
+## Streaming INSERT
+
+`Connection::insert_stream` opens a write-side counterpart to query streaming: send the `INSERT` statement without data, then push rows in chunks via `std::io::Write`. The connection applies backpressure, so a producer faster than the engine is throttled rather than buffered without bound.
+
+```rust
+use std::io::Write as _;
+use chdb_rust::connection::Connection;
+use chdb_rust::format::{InputFormat, OutputFormat};
+
+let mut conn = Connection::open_in_memory()?;
+conn.query(
+    "CREATE TABLE events (id UInt64, name String) ENGINE = MergeTree ORDER BY id",
+    OutputFormat::TabSeparated,
+)?;
+
+let mut ins = conn.insert_stream("INSERT INTO events (id, name)", InputFormat::JSONEachRow)?;
+writeln!(ins, r#"{{"id":1,"name":"event-1"}}"#)?;
+let stats = ins.finish()?;
+println!("wrote {} rows", stats.rows_written);
+```
+
+The INSERT statement must carry no `FORMAT` clause and no inline data — the format is the `format` argument.
+
+See `examples/14_insert_stream.rs` for a runnable program.
+
+
+An INSERT statement can carry `{name:Type}` placeholders too — see
+[Parameterized Queries](#parameterized-queries) for the binding rules, and use
+`Connection::insert_stream_with_params` to open the stream.
+
+## One-Shot Arrow Export
+
+`Connection::query_arrow` takes a whole result as an Arrow stream, zero-copy where the engine can manage it — no IPC serialization and no compression round-trip. It returns an `ArrowReader` that implements both `Iterator` and `arrow::array::RecordBatchReader`:
+
+```rust
+use arrow::array::RecordBatchReader;
+use chdb_rust::connection::Connection;
+
+let conn = Connection::open_in_memory()?;
+let reader = conn.query_arrow("SELECT number FROM numbers(1000)")?;
+println!("schema: {}", reader.schema());
+for batch in reader {
+    println!("rows: {}", batch?.num_rows());
+}
+```
+
+`ArrowOptions` controls the ClickHouse-to-Arrow type mapping — for example, `low_cardinality_as_dictionary` emits `LowCardinality(T)` as an Arrow dictionary array instead of materializing it to `T`:
+
+```rust
+use chdb_rust::arrow_options::ArrowOptions;
+
+let opts = ArrowOptions {
+    low_cardinality_as_dictionary: true,
+    ..ArrowOptions::default()
+};
+let reader = conn.query_arrow_with_opts("SELECT ...", &opts)?;
+```
+
+Prefer `query_stream_arrow` instead when the result is too large to hold at once.
+
+See `examples/15_arrow_query.rs` for a runnable program.
+
+## Runtime Control
+
+chDB installs process-wide signal handlers and starts threads that outlive a dropped connection. `chdb_rust::runtime` is the control surface for both.
+
+```rust
+use chdb_rust::connection::Connection;
+use chdb_rust::format::OutputFormat;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Durable opt-out: the engine will not install deadly-signal handlers.
+    chdb_rust::runtime::signal_handlers(false);
+
+    let conn = Connection::open_in_memory()?;
+    let result = conn.query("SELECT 1 + 1 AS sum", OutputFormat::TabSeparated)?;
+    println!("sum={}", result.data_utf8_lossy().trim());
+
+    // Restore SIG_DFL without setting the disable flag. Subsequent queries
+    // on this connection do not put the handlers back; a later connect might.
+    chdb_rust::runtime::reset_signal_handlers();
+
+    drop(conn);
+    chdb_rust::runtime::shutdown()?;
+    Ok(())
+}
+```
+
+Call `shutdown` before a host teardown sequence of its own — global destructors, a finalizing language runtime, a sanitizer exit handler. A process that simply exits does not need it. Once it succeeds, no further connection can be opened in this process.
+
+See `examples/16_runtime.rs` for a runnable program.
 
 ## Additional Resources
 

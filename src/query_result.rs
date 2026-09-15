@@ -206,6 +206,34 @@ impl QueryResult {
         unsafe { bindings::chdb_result_bytes_read(self.inner) }
     }
 
+    /// Rows written by the query.
+    ///
+    /// Non-zero for statements that write — `INSERT`, and the result returned
+    /// by [`InsertStream::finish`](crate::insert_stream::InsertStream::finish).
+    /// Wraps `chdb_result_rows_written`.
+    pub fn rows_written(&self) -> u64 {
+        unsafe { bindings::chdb_result_rows_written(self.inner) }
+    }
+
+    /// Bytes written by the query. Wraps `chdb_result_bytes_written`.
+    pub fn bytes_written(&self) -> u64 {
+        unsafe { bindings::chdb_result_bytes_written(self.inner) }
+    }
+
+    /// Rows read from storage, as distinct from rows produced.
+    ///
+    /// [`rows_read`](Self::rows_read) counts what the query pipeline handled;
+    /// this counts what came off disk, so a query answered from an index or a
+    /// projection reports fewer here. Wraps `chdb_result_storage_rows_read`.
+    pub fn storage_rows_read(&self) -> u64 {
+        unsafe { bindings::chdb_result_storage_rows_read(self.inner) }
+    }
+
+    /// Bytes read from storage. Wraps `chdb_result_storage_bytes_read`.
+    pub fn storage_bytes_read(&self) -> u64 {
+        unsafe { bindings::chdb_result_storage_bytes_read(self.inner) }
+    }
+
     /// Get the elapsed time for query execution.
     ///
     /// This returns the time it took to execute the query, measured from when

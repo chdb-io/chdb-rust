@@ -69,6 +69,24 @@ pub enum Error {
     /// which typically includes details about SQL syntax errors, missing tables, etc.
     #[error("{0}")]
     QueryError(String),
+    /// Shutdown was asked for while connections were still open.
+    ///
+    /// The engine refuses this rather than tearing itself down under a live
+    /// connection. Close every connection and drop every result first.
+    #[error(
+        "the engine cannot be shut down while {count} connection(s) are open; \
+         drop them first"
+    )]
+    ConnectionsStillOpen {
+        /// How many connection handles are still holding the engine.
+        count: usize,
+    },
+    /// The engine was shut down earlier in this process.
+    ///
+    /// [`runtime::shutdown`](crate::runtime::shutdown) is one-way: once it
+    /// succeeds the library is closed for business for the rest of the process.
+    #[error("the engine was shut down; a new connection cannot be opened in this process")]
+    EngineShutDown,
 }
 
 /// A type alias for `Result<T, Error>`.

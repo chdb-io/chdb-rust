@@ -20,6 +20,9 @@ cargo run --example 10_query_streaming
 cargo run --example 11_query_streaming_arrow
 cargo run --example 12_arrow_query_stream
 cargo run --example 13_query_with_params
+cargo run --example 14_insert_stream
+cargo run --example 15_arrow_query
+cargo run --example 16_runtime
 ```
 
 ## Example Files
@@ -37,6 +40,9 @@ cargo run --example 13_query_with_params
 11. **11_query_streaming_arrow.rs** - Streaming large query results in chunks, decoding Arrow IPC bytes into human-readable tables (requires `--features arrow`)
 12. **12_arrow_query_stream.rs** - Streaming large query results as Arrow `RecordBatch` values via the C Data Interface (requires `--features arrow`)
 13. **13_query_with_params.rs** - Inventory low-stock / price filters bound with `{name:Type}` placeholders via `Session::execute_with_params`
+14. **14_insert_stream.rs** - Streaming INSERT: push rows in chunks via `std::io::Write`
+15. **15_arrow_query.rs** - One-shot Arrow export and `ArrowOptions` type mapping (requires `--features arrow`)
+16. **16_runtime.rs** - Process lifecycle: decline signal handlers, reset them, and shut the engine down
 
 ## Prerequisites
 
