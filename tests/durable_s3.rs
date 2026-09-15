@@ -292,9 +292,19 @@ fn a_database_survives_in_a_bucket() {
         "\"first\"\n\"second\"",
         "the WAL replayed out of S3"
     );
+    object.close().expect("a clean close");
+
+    let scanned = namespace
+        .scan("SELECT count() FROM events", ["tenant"], OutputFormat::CSV)
+        .expect("a sequential S3 scan");
+    assert_eq!(scanned.len(), 1);
+    assert_eq!(String::from_utf8_lossy(&scanned[0].1).trim(), "2");
 
     // And a checkpoint, which is the path that uploads a file rather than a
     // buffer.
+    let (object, _) = namespace
+        .open("tenant", OpenOptions::default())
+        .expect("a writer after the scan");
     let base = object.checkpoint().expect("a checkpoint");
     assert!(base.key.starts_with("checkpoints/"), "{}", base.key);
     assert!(object.manifest().wal.is_empty());

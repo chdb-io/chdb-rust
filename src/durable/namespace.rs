@@ -354,6 +354,60 @@ impl Namespace {
         };
         open_object(id, backend, &self.engine_factory, options)
     }
+
+    /// Runs one read-only query against several objects, opening them one at a
+    /// time and returning the bytes together with each object id.
+    ///
+    /// This is a small fan-out convenience, not a cross-object query engine.
+    /// chdb-core permits one active data path per process, so the objects must
+    /// be restored and closed sequentially. A missing object returns
+    /// [`Category::NotFound`], just like a direct read-only [`Self::open`].
+    ///
+    /// ```no_run
+    /// use chdb_rust::durable::Namespace;
+    /// use chdb_rust::format::OutputFormat;
+    ///
+    /// let namespace = Namespace::new("s3://my-bucket/agent-memory")?;
+    /// let rows = namespace.scan(
+    ///     "SELECT count() FROM memories",
+    ///     ["tenant-a", "tenant-b"],
+    ///     OutputFormat::CSV,
+    /// )?;
+    /// for (id, bytes) in rows {
+    ///     println!("{id}: {}", String::from_utf8_lossy(&bytes));
+    /// }
+    /// # Ok::<(), chdb_rust::durable::Error>(())
+    /// ```
+    pub fn scan<I, S>(
+        &self,
+        sql: &str,
+        ids: I,
+        format: crate::format::OutputFormat,
+    ) -> Result<Vec<(String, Vec<u8>)>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut results = Vec::new();
+        for id in ids {
+            let id = id.as_ref();
+            let (object, _) = self.open(
+                id,
+                OpenOptions {
+                    read_only: true,
+                    ..OpenOptions::default()
+                },
+            )?;
+            let query = object.query(sql, format);
+            let close = object.close();
+            match (query, close) {
+                (Ok(bytes), Ok(())) => results.push((id.to_owned(), bytes)),
+                (Err(error), _) => return Err(error),
+                (Ok(_), Err(error)) => return Err(error),
+            }
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]

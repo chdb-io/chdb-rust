@@ -487,6 +487,39 @@ fn a_read_only_open_of_a_missing_object_is_not_found_and_creates_nothing() {
 }
 
 #[test]
+fn namespace_scan_reads_objects_sequentially_without_creating_them() {
+    let tmp = common::tempdir();
+    let applied = Applied::default();
+    let namespace = namespace(tmp.path(), &applied);
+
+    for (id, value) in [("one", 1), ("two", 2)] {
+        let (object, existed) = namespace
+            .open(id, OpenOptions::default())
+            .expect("a writer");
+        assert!(!existed);
+        object
+            .execute(&format!("INSERT INTO t VALUES ({value})"))
+            .expect("a write");
+        object.flush().expect("a flush");
+        object.close().expect("a clean close");
+    }
+
+    let results = namespace
+        .scan("SELECT 1", ["one", "two"], OutputFormat::CSV)
+        .expect("a sequential scan");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].0, "one");
+    assert_eq!(results[1].0, "two");
+    assert_eq!(results[0].1, b"INSERT INTO t VALUES (1)".to_vec());
+    assert_eq!(results[1].1, b"INSERT INTO t VALUES (2)".to_vec());
+
+    let error = namespace
+        .scan("SELECT 1", ["missing"], OutputFormat::CSV)
+        .expect_err("a scan must not create missing objects");
+    assert_eq!(error.category(), Category::NotFound);
+}
+
+#[test]
 fn a_read_only_handle_serves_the_manifest_and_refuses_to_write() {
     let tmp = common::tempdir();
     let applied = Applied::default();
