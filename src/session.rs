@@ -412,10 +412,7 @@ impl Session {
         query_args: Option<&[Arg]>,
     ) -> Result<QueryStream<'a>> {
         let fmt = extract_output_format(query_args, self.default_format);
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
-            .query_stream(query, fmt)
+        self.connection_mut().query_stream(query, fmt)
     }
 
     /// Execute a query with ClickHouse `{name:Type}` parameter binding and stream the result in chunks.
@@ -462,9 +459,7 @@ impl Session {
         params: impl Into<QueryParams>,
     ) -> Result<QueryStream<'a>> {
         let fmt = extract_output_format(query_args, self.default_format);
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
+        self.connection_mut()
             .query_stream_with_params(query, fmt, params)
     }
 
@@ -482,10 +477,7 @@ impl Session {
         sql: &str,
         format: InputFormat,
     ) -> Result<InsertStream<'a>> {
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
-            .insert_stream(sql, format)
+        self.connection_mut().insert_stream(sql, format)
     }
 
     /// Open a streaming INSERT whose statement carries `{name:Type}` placeholders.
@@ -498,9 +490,7 @@ impl Session {
         format: InputFormat,
         params: impl Into<QueryParams>,
     ) -> Result<InsertStream<'a>> {
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
+        self.connection_mut()
             .insert_stream_with_params(sql, format, params)
     }
 
@@ -652,10 +642,7 @@ impl Session {
         &'a mut self,
         query: &str,
     ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'a>> {
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
-            .query_stream_arrow(query)
+        self.connection_mut().query_stream_arrow(query)
     }
 
     /// Execute a query with ClickHouse `{name:Type}` parameter binding and stream Arrow record batches.
@@ -699,9 +686,7 @@ impl Session {
         params: impl Into<QueryParams>,
         opts: Option<&ArrowOptions>,
     ) -> Result<ArrowQueryStream<'a>> {
-        self.conn
-            .as_mut()
-            .expect("a session holds its connection until it is dropped")
+        self.connection_mut()
             .query_stream_arrow_with_params(query, params, opts)
     }
 }
