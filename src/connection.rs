@@ -139,34 +139,6 @@ impl Connection {
         Self::open(&[])
     }
 
-    /// Connect to a database at the given path.
-    ///
-    /// Creates a connection to a persistent database stored at the specified path.
-    /// The directory will be created if it doesn't exist.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The filesystem path where the database should be stored
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use chdb_rust::connection::Connection;
-    ///
-    /// let conn = Connection::open_with_path("/tmp/mydb")?;
-    /// # Ok::<(), chdb_rust::error::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::ConnectionFailed`] if the
-    /// connection cannot be established.
-    #[deprecated(note = "Use `SessionBuilder` instead")]
-    pub fn open_with_path(path: &str) -> Result<Self> {
-        let path_arg = format!("--path={path}");
-        Self::open(&[&path_arg])
-    }
-
     /// Get the underlying chDB connection handle.
     ///
     /// Returns the `chdb_connection` value passed to chDB C API functions. This is
