@@ -35,6 +35,7 @@ use crate::query_result::QueryResult;
 /// The classes answer two questions at once: does this change anything after
 /// the statement returns, and would `BACKUP DATABASE` carry the change?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum QueryClass {
     /// `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `EXISTS`, `CHECK`: leaves no trace.
     ReadOnly,

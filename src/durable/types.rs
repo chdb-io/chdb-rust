@@ -50,6 +50,7 @@ pub const MAX_SAFE_INTEGER: u64 = (1u64 << 53) - 1;
 
 /// The version and feature negotiation block.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Protocol {
     /// The protocol revision the object was written against.
     pub version: u64,
@@ -71,6 +72,7 @@ impl Default for Protocol {
 
 /// Which engine produced the object, and what a reader needs to restore it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EngineIdentity {
     /// Always `chdb` for an object this crate can open.
     pub name: String,
@@ -90,6 +92,7 @@ pub struct EngineIdentity {
 /// both before anything is restored or replayed, and they are what makes an
 /// ambiguous upload resolvable (§5.8).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ObjectRef {
     /// Relative to `<namespace>/<object-id>/`, `/`-separated, no leading slash.
     pub key: String,
@@ -105,6 +108,7 @@ pub struct ObjectRef {
 /// while the generation stays, so the next acquirer knows what to increment
 /// past.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Lease {
     /// Moves forward only on a real change of owner: acquiring from released,
     /// taking over an expired lease, or a force takeover. A heartbeat renews
@@ -143,6 +147,7 @@ impl Lease {
 /// The object's committed state: one database, one base, and the WAL to replay
 /// over it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Manifest {
     /// The one database this object holds.
     pub db: String,
@@ -162,6 +167,7 @@ pub struct Manifest {
 /// document, because dropping them would silently strip a future revision's
 /// state (§4.2, §4.3).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Head {
     /// Version and feature negotiation.
     pub protocol: Protocol,

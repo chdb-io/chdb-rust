@@ -27,6 +27,7 @@ use crate::query_result::QueryResult;
 
 /// What a finished insert wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WriteStats {
     /// Rows committed by this stream.
     pub rows_written: u64,

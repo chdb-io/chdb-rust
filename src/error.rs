@@ -11,6 +11,7 @@ use std::string::FromUtf8Error;
 /// Most errors are self-explanatory, with `QueryError` containing the actual error
 /// message from the underlying chDB library.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// An unknown error has occurred.
     #[error("An unknown error has occurred")]

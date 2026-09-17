@@ -164,6 +164,7 @@ pub struct OpenOptions {
 /// what lets a caller that expands one request into several statements answer
 /// the request as a whole without the protocol having to know about requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub struct WriteTicket {
     /// The ordinal of the statement within this open session, starting at 1.
     pub statement: u64,
@@ -178,6 +179,7 @@ pub struct WriteTicket {
 ///
 /// It carries no credentials and no SQL, so it is safe to log verbatim.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Stats {
     /// The object's id within its namespace.
     pub id: String,
