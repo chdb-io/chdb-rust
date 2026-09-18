@@ -67,6 +67,19 @@ pub struct Tagged {
     pub etag: String,
 }
 
+impl Tagged {
+    /// One object read whole, with the token describing that version.
+    ///
+    /// A [`Backend`] implementation outside this crate needs this: the struct is
+    /// `#[non_exhaustive]`, so it cannot be built with a struct literal.
+    pub fn new(data: Vec<u8>, etag: impl Into<String>) -> Self {
+        Self {
+            data,
+            etag: etag.into(),
+        }
+    }
+}
+
 /// A key/value store scoped to one object's prefix.
 ///
 /// Keys are relative, `/`-separated and validated by

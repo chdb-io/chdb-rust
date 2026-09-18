@@ -191,17 +191,17 @@ fn classify(sql: &str, target_database: &str) -> QueryAnalysis {
     } else {
         (QueryClass::Unknown, false)
     };
-    QueryAnalysis {
+    QueryAnalysis::new(
         class,
-        statement_count: if class == QueryClass::Unknown {
+        if class == QueryClass::Unknown {
             0
         } else {
             statement_count
         },
-        has_secrets: sql.to_uppercase().contains("PASSWORD"),
-        writes_only_target_database: !sql.contains("elsewhere.") && !target_database.is_empty(),
-        changes_database_lifecycle: lifecycle,
-    }
+    )
+    .with_secrets(sql.to_uppercase().contains("PASSWORD"))
+    .with_writes_only_target_database(!sql.contains("elsewhere.") && !target_database.is_empty())
+    .with_changes_database_lifecycle(lifecycle)
 }
 
 // ------------------------------------------------------------ fault backend
@@ -1474,4 +1474,23 @@ fn a_heartbeat_running_through_commits_does_not_disturb_them() {
     );
     assert!(!object.is_fenced(), "renewals kept the lease");
     object.close().expect("a clean close");
+}
+
+/// `Tagged` and `QueryAnalysis` are `#[non_exhaustive]`, so a struct literal is
+/// no longer available outside the crate — but both sit in the return type of a
+/// public trait (`Backend::get_bytes_with_etag`, `Engine::analyze`), so an
+/// implementor living in another crate has to be able to build them. This test
+/// is that implementor.
+#[test]
+fn the_public_extension_points_stay_constructible_from_outside_the_crate() {
+    let tagged = Tagged::new(b"payload".to_vec(), "etag-1");
+    assert_eq!(tagged.data, b"payload");
+    assert_eq!(tagged.etag, "etag-1");
+
+    let analysis = QueryAnalysis::new(QueryClass::Mutating, 2).with_secrets(true);
+    assert_eq!(analysis.class, QueryClass::Mutating);
+    assert_eq!(analysis.statement_count, 2);
+    assert!(analysis.has_secrets);
+    assert!(!analysis.writes_only_target_database);
+    assert!(!analysis.changes_database_lifecycle);
 }
