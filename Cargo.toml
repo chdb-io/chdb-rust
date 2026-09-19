@@ -1,6 +1,6 @@
 [package]
 name = "chdb-rust"
-version = "1.4.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Auxten"]
 description = "chDB FFI bindings for Rust(Experimental)"
@@ -130,7 +130,7 @@ required-features = ["arrow"]
 # rather than a ClickHouse 26.7.0. The chdb-core release notes for the tag name
 # the exact upstream build.
 #
-# The crate version above is unrelated — 1.4.0 is this crate's own numbering — so
+# The crate version above is unrelated — 2.0.0 is this crate's own numbering — so
 # without this key there is no way to tell which engine a published version
 # carries short of reading build.rs at the matching tag. Here it travels with the
 # package, readable through `cargo metadata`, the .crate archive or the docs.rs

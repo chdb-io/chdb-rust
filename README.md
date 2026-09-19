@@ -308,7 +308,7 @@ use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
 SQL-only users can disable it to avoid building Arrow:
 
 ```toml
-chdb-rust = { version = "1.4", default-features = false }
+chdb-rust = { version = "2.0", default-features = false }
 ```
 
 See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:
