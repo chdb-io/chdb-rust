@@ -30,6 +30,7 @@ use super::errors::Result;
 
 /// The result of a conditional create.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PutOutcome {
     /// The object was created by this call.
     Created,
@@ -43,6 +44,7 @@ pub enum PutOutcome {
 
 /// The result of a conditional replace.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplaceOutcome {
     /// The compare-and-swap succeeded; the new CAS token is attached.
     Done {
@@ -57,11 +59,25 @@ pub enum ReplaceOutcome {
 
 /// One object read whole, with the CAS token describing that same version.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Tagged {
     /// The object's bytes.
     pub data: Vec<u8>,
     /// An opaque compare-and-swap token. Never assumed to be a content MD5.
     pub etag: String,
+}
+
+impl Tagged {
+    /// One object read whole, with the token describing that version.
+    ///
+    /// A [`Backend`] implementation outside this crate needs this: the struct is
+    /// `#[non_exhaustive]`, so it cannot be built with a struct literal.
+    pub fn new(data: Vec<u8>, etag: impl Into<String>) -> Self {
+        Self {
+            data,
+            etag: etag.into(),
+        }
+    }
 }
 
 /// A key/value store scoped to one object's prefix.

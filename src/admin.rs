@@ -35,6 +35,7 @@ use crate::query_result::QueryResult;
 /// The classes answer two questions at once: does this change anything after
 /// the statement returns, and would `BACKUP DATABASE` carry the change?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum QueryClass {
     /// `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `EXISTS`, `CHECK`: leaves no trace.
     ReadOnly,
@@ -89,6 +90,7 @@ impl std::fmt::Display for QueryClass {
 
 /// What [`Connection::classify_query`] reports about a statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct QueryAnalysis {
     /// What the statement does to state that outlives it.
     pub class: QueryClass,
@@ -107,6 +109,43 @@ pub struct QueryAnalysis {
     /// The statement creates, drops or renames a database rather than acting
     /// inside one — a change to the container rather than its contents.
     pub changes_database_lifecycle: bool,
+}
+
+impl QueryAnalysis {
+    /// An analysis with every flag clear.
+    ///
+    /// The flags are set with the `with_*` methods rather than passed
+    /// positionally: three of them are `bool`, and a transposed pair would
+    /// compile and be wrong. An [`Engine`](crate::durable::Engine)
+    /// implementation outside this crate needs this, since the struct is
+    /// `#[non_exhaustive]`.
+    pub fn new(class: QueryClass, statement_count: u32) -> Self {
+        Self {
+            class,
+            statement_count,
+            has_secrets: false,
+            writes_only_target_database: false,
+            changes_database_lifecycle: false,
+        }
+    }
+
+    /// The text carries a credential.
+    pub fn with_secrets(mut self, yes: bool) -> Self {
+        self.has_secrets = yes;
+        self
+    }
+
+    /// Every persistent write lands in the database named in the call.
+    pub fn with_writes_only_target_database(mut self, yes: bool) -> Self {
+        self.writes_only_target_database = yes;
+        self
+    }
+
+    /// The statement creates, drops or renames a database.
+    pub fn with_changes_database_lifecycle(mut self, yes: bool) -> Self {
+        self.changes_database_lifecycle = yes;
+        self
+    }
 }
 
 impl Connection {

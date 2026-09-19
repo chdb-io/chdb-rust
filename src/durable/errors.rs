@@ -284,6 +284,30 @@ pub(crate) fn backend_err(cause: std::io::Error, message: impl Into<String>) -> 
 mod test {
     use super::*;
 
+    /// The durable and crate error domains are separate types, so a caller
+    /// mixing them had to map by hand. `?` must carry a durable error into a
+    /// crate-level `Result` and keep its category, not flatten it to a string.
+    #[test]
+    fn a_durable_error_crosses_into_the_crate_result_with_question_mark() {
+        fn durable_call() -> Result<()> {
+            Err(Error::new(Category::NotFound, "no such object"))
+        }
+
+        fn crate_level() -> crate::error::Result<()> {
+            durable_call()?;
+            Ok(())
+        }
+
+        let err = crate_level().expect_err("the durable failure must propagate");
+        match err {
+            crate::error::Error::Durable(inner) => {
+                assert_eq!(inner.category(), Category::NotFound);
+                assert!(inner.to_string().contains("no such object"));
+            }
+            other => panic!("expected Error::Durable, got {other:?}"),
+        }
+    }
+
     #[test]
     fn every_frozen_category_keeps_its_wire_name() {
         // The contract's §6 table, verbatim. A rename here is a protocol

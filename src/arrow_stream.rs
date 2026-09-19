@@ -96,8 +96,13 @@ impl ArrowStream {
     ///
     /// # Returns
     ///
-    /// Returns the raw `ArrowArrayStream` pointer.
-    pub fn as_raw(&self) -> bindings::chdb_arrow_stream {
+    /// Returns the raw `ArrowArrayStream` pointer as [`RawArrowArrayStream`].
+    pub fn as_raw(&self) -> RawArrowArrayStream {
+        self.inner
+    }
+
+    /// The same pointer typed for the chDB C ABI.
+    pub(crate) fn as_c(&self) -> bindings::chdb_arrow_stream {
         self.inner.cast()
     }
 }
@@ -146,7 +151,12 @@ impl ArrowSchema {
     /// # Returns
     ///
     /// Returns the raw `ArrowSchema` pointer.
-    pub fn as_raw(&self) -> bindings::chdb_arrow_schema {
+    pub fn as_raw(&self) -> RawArrowSchema {
+        self.inner
+    }
+
+    /// The same pointer typed for the chDB C ABI.
+    pub(crate) fn as_c(&self) -> bindings::chdb_arrow_schema {
         self.inner.cast()
     }
 }
@@ -195,7 +205,12 @@ impl ArrowArray {
     /// # Returns
     ///
     /// Returns the raw `ArrowArray` pointer.
-    pub fn as_raw(&self) -> bindings::chdb_arrow_array {
+    pub fn as_raw(&self) -> RawArrowArray {
+        self.inner
+    }
+
+    /// The same pointer typed for the chDB C ABI.
+    pub(crate) fn as_c(&self) -> bindings::chdb_arrow_array {
         self.inner.cast()
     }
 }

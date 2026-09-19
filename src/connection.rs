@@ -620,7 +620,7 @@ impl Connection {
         let conn = unsafe { *self.inner };
 
         let state = unsafe {
-            bindings::chdb_arrow_scan(conn, table_name_cstr.as_ptr(), arrow_stream.as_raw())
+            bindings::chdb_arrow_scan(conn, table_name_cstr.as_ptr(), arrow_stream.as_c())
         };
 
         if state == bindings::chdb_state_CHDBSuccess {
@@ -688,8 +688,8 @@ impl Connection {
             bindings::chdb_arrow_array_scan(
                 conn,
                 table_name_cstr.as_ptr(),
-                arrow_schema.as_raw(),
-                arrow_array.as_raw(),
+                arrow_schema.as_c(),
+                arrow_array.as_c(),
             )
         };
 
@@ -778,8 +778,8 @@ impl Connection {
             bindings::chdb_insert_arrow_array(
                 conn,
                 dest_cstr.as_ptr(),
-                arrow_schema.as_raw(),
-                arrow_array.as_raw(),
+                arrow_schema.as_c(),
+                arrow_array.as_c(),
                 options_ptr,
             )
         };
@@ -805,7 +805,7 @@ impl Connection {
             bindings::chdb_insert_arrow_stream(
                 conn,
                 dest_cstr.as_ptr(),
-                arrow_stream.as_raw(),
+                arrow_stream.as_c(),
                 options_ptr,
             )
         };

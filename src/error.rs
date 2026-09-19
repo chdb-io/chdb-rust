@@ -11,6 +11,7 @@ use std::string::FromUtf8Error;
 /// Most errors are self-explanatory, with `QueryError` containing the actual error
 /// message from the underlying chDB library.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// An unknown error has occurred.
     #[error("An unknown error has occurred")]
@@ -63,6 +64,19 @@ pub enum Error {
     /// scheme, and so not a substitute.
     #[error("the linked libchdb does not export chdb_version(); it predates chdb-core v26.7.0")]
     EngineVersionUnavailable,
+    /// A durable-object operation failed.
+    ///
+    /// Carries the durable error whole, so its
+    /// [`Category`](crate::durable::Error::category) and the detail
+    /// accessors survive the conversion — a caller can still branch on the
+    /// specifics after the error has crossed into a crate-level [`Result`].
+    ///
+    /// This exists so a function returning [`Result`] can apply `?` to a
+    /// durable call directly, instead of mapping the error by hand.
+    #[cfg(all(feature = "durable", has_durable_abi))]
+    #[error(transparent)]
+    Durable(#[from] crate::durable::Error),
+
     /// A query execution error occurred.
     ///
     /// This contains the error message from the underlying chDB library,

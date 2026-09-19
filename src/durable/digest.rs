@@ -23,6 +23,7 @@ const CHUNK: usize = 1024 * 1024;
 
 /// The length and content hash of one object.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Digest {
     /// Length in bytes.
     pub size: u64,
