@@ -404,7 +404,7 @@ eval "$(aws configure export-credentials --profile my-profile --format env)"
 
 `AWS_CA_BUNDLE` is honoured, so a host behind a TLS-inspecting proxy works the
 same way `aws s3` does beside it. Any other provider is plugged in by
-implementing `durable::Backend` — six methods — and passing it to
+implementing `durable::Backend` — seven methods — and passing it to
 `Namespace::with_backend`.
 
 The protocol is specified in [CHDB_DURABLE_V1_CONTRACT.md][contract] in the chdb
