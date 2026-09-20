@@ -41,7 +41,7 @@ Add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "1.1.0"
+chdb-rust = "2.0.0"
 ```
 
 The library will automatically download the required `libchdb` binary during the build process.
@@ -393,7 +393,8 @@ rather than through `aws-sdk-s3`, so enabling this costs an HTTP and TLS stack
 rather than an async runtime and several dozen crates.
 
 Credentials are never part of the URL — a namespace URL gets logged, committed
-and pasted into issues. They come from `AWS_ACCESS_KEY_ID` /
+and pasted into issues, so a `s3://user:secret@bucket/...` URL is refused rather
+than quietly ignored. They come from `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, or from `~/.aws/credentials`
 honouring `AWS_PROFILE`. SSO and instance roles are not resolved in-crate;
 export them first, the way the CLI does:
@@ -404,7 +405,7 @@ eval "$(aws configure export-credentials --profile my-profile --format env)"
 
 `AWS_CA_BUNDLE` is honoured, so a host behind a TLS-inspecting proxy works the
 same way `aws s3` does beside it. Any other provider is plugged in by
-implementing `durable::Backend` — six methods — and passing it to
+implementing `durable::Backend` — seven methods — and passing it to
 `Namespace::with_backend`.
 
 The protocol is specified in [CHDB_DURABLE_V1_CONTRACT.md][contract] in the chdb
@@ -414,9 +415,10 @@ repository, which is the source of truth rather than this implementation.
 cargo run --features durable --example 09_durable_object
 cargo test --features durable
 
-# Against a bucket you own. Skipped, loudly, when the variable is unset.
+# Against a bucket you own. These are `#[ignore]`d, so an ordinary run reports
+# them as ignored rather than as passing; `--ignored` opts into them.
 export CHDB_DURABLE_S3_BUCKET=my-bucket CHDB_DURABLE_S3_REGION=eu-central-1
-cargo test --features durable-s3 --test durable_s3 -- --test-threads=1
+cargo test --features durable-s3 --test durable_s3 -- --test-threads=1 --ignored
 ```
 
 Needs chdb-core v26.7.2-rc.2 or newer, which is where backup, restore and
