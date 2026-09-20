@@ -393,7 +393,8 @@ rather than through `aws-sdk-s3`, so enabling this costs an HTTP and TLS stack
 rather than an async runtime and several dozen crates.
 
 Credentials are never part of the URL — a namespace URL gets logged, committed
-and pasted into issues. They come from `AWS_ACCESS_KEY_ID` /
+and pasted into issues, so a `s3://user:secret@bucket/...` URL is refused rather
+than quietly ignored. They come from `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, or from `~/.aws/credentials`
 honouring `AWS_PROFILE`. SSO and instance roles are not resolved in-crate;
 export them first, the way the CLI does:
