@@ -118,6 +118,22 @@ fn s3_location(url: &str) -> Result<(String, String)> {
             format!("durable: an s3 namespace URL needs a bucket, got {url:?}"),
         ));
     }
+    // `user:secret@bucket` is the one shape that must not be accepted quietly.
+    // An `@` cannot appear in a bucket name, so the whole authority would have
+    // been taken as one, and the credential would then travel wherever the
+    // location does: `Namespace::location`, `Backend::describe`, every error
+    // built from it, and the request path itself. Refused rather than stripped,
+    // because a caller who put credentials here believes they are being used.
+    // The message deliberately quotes neither the URL nor the userinfo.
+    if bucket.contains('@') {
+        return Err(err(
+            Category::Backend,
+            "durable: an s3 namespace URL must not carry credentials; the URL is logged, \
+             committed and pasted into issues. Remove the `user:secret@` part and export \
+             AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, use ~/.aws/credentials, or pass \
+             S3Options::credentials",
+        ));
+    }
     Ok((bucket.to_string(), prefix.to_string()))
 }
 
@@ -448,6 +464,33 @@ mod test {
         assert_eq!(
             s3_location("s3://").unwrap_err().category(),
             Category::Backend
+        );
+    }
+
+    #[cfg(feature = "durable-s3")]
+    #[test]
+    fn an_s3_url_carrying_credentials_is_refused_without_repeating_them() {
+        let secret = "wJalrXUtnFEMIsecret";
+        let error = s3_location(&format!(
+            "s3://AKIAIOSFODNN7EXAMPLE:{secret}@my-bucket/durable?region=us-east-1"
+        ))
+        .expect_err("credentials in the URL are not a usable bucket");
+        assert_eq!(error.category(), Category::Backend);
+
+        // The whole point is that this string does not travel: refusing while
+        // quoting the URL back would put the secret in the log it was meant to
+        // stay out of.
+        let message = error.to_string();
+        assert!(
+            !message.contains(secret) && !message.contains("AKIAIOSFODNN7EXAMPLE"),
+            "the refusal repeated the credential: {message}"
+        );
+        assert!(message.contains("must not carry credentials"), "{message}");
+
+        // An `@` below the authority is a legal S3 key character and stays one.
+        assert_eq!(
+            s3_location("s3://my-bucket/durable/a@b").unwrap(),
+            ("my-bucket".to_string(), "durable/a@b".to_string())
         );
     }
 
