@@ -24,7 +24,7 @@ First, add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "1.0.0"
+chdb-rust = "2.0.0"
 ```
 
 Make sure you have `libchdb` installed on your system. See the main README for installation instructions.
@@ -418,8 +418,8 @@ In Rust, build the expression with `arrow_stream_table_sql("my_batch")`.
 use std::sync::Arc;
 use chdb_rust::arrow::array::{Int64Array, RecordBatch};
 use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
-use chdb_rust::arrow_insert::insert_record_batch;
 use chdb_rust::session::SessionBuilder;
+use chdb_rust::InsertOptions;
 
 let session = SessionBuilder::new()
     .with_data_path("/tmp/chdb-ingest")
@@ -434,12 +434,15 @@ session.execute(
 let batch = RecordBatch::try_new(
     Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)])),
     vec![Arc::new(Int64Array::from(vec![1i64, 2, 3]))],
-)?;
+)
+.map_err(|e| chdb_rust::error::Error::QueryError(e.to_string()))?;
 
-session.insert_record_batch("metrics", "flush_1", &batch)?;
+session.insert_record_batch("metrics", "flush_1", batch, InsertOptions::default_bulk())?;
 ```
 
-`insert_record_batches` accepts multiple batches via an Arrow `RecordBatchReader`.
+`insert_record_batches` takes several batches at once as a `Vec<RecordBatch>` plus
+their `SchemaRef`; `insert_record_batch_reader` is the one that takes an Arrow
+`RecordBatchReader`, for batches produced lazily.
 
 `dest_table` must be a bare ClickHouse table identifier (e.g. `metrics`); dotted names (`db.table`) and reserved words are not quoted automatically.
 
@@ -552,7 +555,7 @@ URL. For an SSO profile, export them first:
 eval "$(aws configure export-credentials --profile my-profile --format env)"
 ```
 
-Any other provider is plugged in by implementing `durable::Backend` — six
+Any other provider is plugged in by implementing `durable::Backend` — seven
 methods, of which the two conditional writes carry the whole protocol — and
 handing it to `Namespace::with_backend`.
 
