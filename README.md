@@ -414,9 +414,10 @@ repository, which is the source of truth rather than this implementation.
 cargo run --features durable --example 09_durable_object
 cargo test --features durable
 
-# Against a bucket you own. Skipped, loudly, when the variable is unset.
+# Against a bucket you own. These are `#[ignore]`d, so an ordinary run reports
+# them as ignored rather than as passing; `--ignored` opts into them.
 export CHDB_DURABLE_S3_BUCKET=my-bucket CHDB_DURABLE_S3_REGION=eu-central-1
-cargo test --features durable-s3 --test durable_s3 -- --test-threads=1
+cargo test --features durable-s3 --test durable_s3 -- --test-threads=1 --ignored
 ```
 
 Needs chdb-core v26.7.2-rc.2 or newer, which is where backup, restore and
