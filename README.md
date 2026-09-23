@@ -12,9 +12,9 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust.
 
 - **Stateless queries**: Execute one-off queries without persistent storage
 - **Stateful sessions**: Create databases and tables with persistent storage
+- **Parameterized queries**: typed `{name:Type}` bindings via `QueryParam`, across buffered, streaming, Arrow-streaming and insert statements — values are bound in the chDB library, never spliced into the SQL text
 - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 - **Query result streaming**: Read large result sets in chunks with constant memory
-- **Parameterized queries**: typed `{name:Type}` bindings via `QueryParam`, across buffered, streaming, Arrow-streaming and insert statements — values are bound in the chDB library, never spliced into the SQL text
 - **Streaming INSERT**: push rows in chunks in any input format, with engine backpressure; the stream also implements `std::io::Write`
 - **Arrow bulk insert** (feature `arrow`, on by default): register in-memory Arrow data and insert via `ArrowStream('name')`
 - **Arrow batch streaming** (with the `arrow` feature): stream query results as `RecordBatch` values via the Arrow C Data Interface
