@@ -162,6 +162,9 @@ fn main() -> Result<(), chdb_rust::error::Error> {
         Err(e) => eprintln!("Error: {}", e),
     }
     
+    // Borrow it as &str without copying (returns error if invalid UTF-8)
+    println!("&str: {}", result.data_str()?);
+    
     // Get result as UTF-8 string (lossy conversion for invalid UTF-8)
     println!("Lossy UTF-8: {}", result.data_utf8_lossy());
     

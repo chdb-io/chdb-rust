@@ -56,6 +56,12 @@ pub enum Error {
     /// The data contains invalid UTF-8 sequences.
     #[error("Non UTF-8 sequence: {0}")]
     NonUtf8Sequence(FromUtf8Error),
+    /// The result data is not valid UTF-8.
+    ///
+    /// Returned by [`QueryResult::data_str`](crate::query_result::QueryResult::data_str),
+    /// which checks the bytes in place rather than copying them first.
+    #[error("Invalid UTF-8 in result: {0}")]
+    InvalidUtf8(std::str::Utf8Error),
     /// The linked library cannot report which chdb-core release it is.
     ///
     /// `chdb_version()` arrived in chdb-core v26.7.0; an older library does not

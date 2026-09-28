@@ -58,7 +58,8 @@ impl QueryResult {
     /// Get the result data as a UTF-8 string.
     ///
     /// This method validates that the data is valid UTF-8. If the data contains
-    /// invalid UTF-8 sequences, it returns an error.
+    /// invalid UTF-8 sequences, it returns an error. It copies the data into a
+    /// new `String`; use [`data_str`](Self::data_str) to borrow it instead.
     ///
     /// # Returns
     ///
@@ -84,6 +85,31 @@ impl QueryResult {
     pub fn data_utf8(&self) -> Result<String> {
         let buf = self.data_ref();
         String::from_utf8(buf.to_vec()).map_err(Error::NonUtf8Sequence)
+    }
+
+    /// Borrow the result data as a `&str`, without copying it.
+    ///
+    /// The bytes are checked in place, so this is the cheapest way to read a
+    /// text result: nothing is allocated. Use [`data_utf8`](Self::data_utf8) if
+    /// you need an owned `String`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chdb_rust::execute;
+    ///
+    /// let result = execute("SELECT 'Hello, World!' AS greeting", None)?;
+    /// let text: &str = result.data_str()?;
+    /// println!("{text}");
+    /// # Ok::<(), chdb_rust::error::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidUtf8`] if the data is not valid UTF-8, for
+    /// example with a binary output format such as `RowBinary` or `Parquet`.
+    pub fn data_str(&self) -> Result<&str> {
+        std::str::from_utf8(self.data_ref()).map_err(Error::InvalidUtf8)
     }
 
     /// Get the result data as a UTF-8 string, replacing invalid sequences.
