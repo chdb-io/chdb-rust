@@ -208,3 +208,76 @@ fn a_session_can_open_an_insert_stream() {
         .expect("count");
     assert_eq!(result.data_utf8_lossy().trim(), "2");
 }
+
+#[test]
+fn many_small_writes_all_land() {
+    use std::io::Write as _;
+
+    let mut conn = conn_with_table();
+    let mut ins = conn
+        .insert_stream("INSERT INTO t (a, b)", InputFormat::JSONEachRow)
+        .expect("open stream");
+
+    // Enough rows to fill the write buffer several times over.
+    for i in 0..20_000u64 {
+        writeln!(ins, r#"{{"a":{i},"b":"row-{i}"}}"#).expect("write");
+    }
+    let stats = ins.finish().expect("finish");
+
+    assert_eq!(stats.rows_written, 20_000);
+    assert_eq!(count(&conn), 20_000);
+}
+
+#[test]
+fn a_write_bigger_than_the_buffer_goes_straight_through() {
+    use std::io::Write as _;
+
+    let mut conn = conn_with_table();
+    let mut ins = conn
+        .insert_stream("INSERT INTO t (a, b)", InputFormat::CSV)
+        .expect("open stream");
+
+    let mut big = String::new();
+    for i in 0..10_000u64 {
+        big.push_str(&format!("{i},\"row-{i}\"\n"));
+    }
+    assert!(big.len() > 64 * 1024);
+    ins.write_all(b"999999,\"first\"\n").expect("small write");
+    ins.write_all(big.as_bytes()).expect("big write");
+    ins.finish().expect("finish");
+
+    assert_eq!(count(&conn), 10_001);
+}
+
+#[test]
+fn dropping_after_buffered_writes_commits_nothing() {
+    use std::io::Write as _;
+
+    let mut conn = conn_with_table();
+    {
+        let mut ins = conn
+            .insert_stream("INSERT INTO t (a, b)", InputFormat::CSV)
+            .expect("open stream");
+        writeln!(ins, "1,\"one\"").expect("write");
+    }
+
+    assert_eq!(count(&conn), 0);
+}
+
+#[test]
+fn write_buffer_size_can_be_changed_or_turned_off() {
+    use std::io::Write as _;
+
+    for size in [0, 16, 1024 * 1024] {
+        let mut conn = conn_with_table();
+        let mut ins = conn
+            .insert_stream("INSERT INTO t (a, b)", InputFormat::CSV)
+            .expect("open stream")
+            .with_write_buffer(size);
+        for i in 0..500u64 {
+            writeln!(ins, "{i},\"row-{i}\"").expect("write");
+        }
+        ins.finish().expect("finish");
+        assert_eq!(count(&conn), 500, "buffer size {size}");
+    }
+}

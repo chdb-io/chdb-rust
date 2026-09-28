@@ -583,6 +583,8 @@ println!("wrote {} rows", stats.rows_written);
 
 The INSERT statement must carry no `FORMAT` clause and no inline data — the format is the `format` argument.
 
+Writes through `std::io::Write` are buffered (64 KiB by default) so a `writeln!` per row stays fast. Change the size with `.with_write_buffer(bytes)`, or pass `0` to send each write straight away.
+
 See `examples/14_insert_stream.rs` for a runnable program.
 
 

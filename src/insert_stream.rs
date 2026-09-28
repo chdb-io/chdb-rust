@@ -62,7 +62,16 @@ pub struct InsertStream<'a> {
     _conn: &'a mut Connection,
     /// Set by `finish`/`cancel` so `Drop` does not act a second time.
     done: bool,
+    /// Bytes from `io::Write` calls not yet handed to the engine. Each append
+    /// is a trip across the FFI boundary where the engine copies the chunk,
+    /// so lots of small writes (a `writeln!` per row) are gathered up first.
+    pending: Vec<u8>,
+    /// How much `io::Write` gathers before sending. Zero means no buffering.
+    write_buffer: usize,
 }
+
+/// The default for [`InsertStream::with_write_buffer`].
+pub const DEFAULT_WRITE_BUFFER: usize = 64 * 1024;
 
 impl<'a> InsertStream<'a> {
     pub(crate) fn start(conn: &'a mut Connection, sql: &str, format: InputFormat) -> Result<Self> {
@@ -85,6 +94,8 @@ impl<'a> InsertStream<'a> {
             handle,
             _conn: conn,
             done: false,
+            pending: Vec::new(),
+            write_buffer: DEFAULT_WRITE_BUFFER,
         };
 
         // Checked through the constructed value so that a failed init still
@@ -129,6 +140,8 @@ impl<'a> InsertStream<'a> {
             handle,
             _conn: conn,
             done: false,
+            pending: Vec::new(),
+            write_buffer: DEFAULT_WRITE_BUFFER,
         };
         stream.check_error()?;
         Ok(stream)
@@ -149,6 +162,30 @@ impl<'a> InsertStream<'a> {
         Err(Error::QueryError(detail))
     }
 
+    /// Set how many bytes `io::Write` gathers before sending them to the engine.
+    ///
+    /// Defaults to [`DEFAULT_WRITE_BUFFER`] (64 KiB). Pass `0` to send every
+    /// write straight away. This only affects writes made through
+    /// [`std::io::Write`]; [`append`](Self::append) always sends immediately.
+    ///
+    /// ```no_run
+    /// use std::io::Write;
+    /// use chdb_rust::connection::Connection;
+    /// use chdb_rust::format::InputFormat;
+    ///
+    /// let mut conn = Connection::open_in_memory()?;
+    /// let mut ins = conn
+    ///     .insert_stream("INSERT INTO t (a)", InputFormat::CSV)?
+    ///     .with_write_buffer(1024 * 1024);
+    /// writeln!(ins, "1")?;
+    /// ins.finish()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn with_write_buffer(mut self, bytes: usize) -> Self {
+        self.write_buffer = bytes;
+        self
+    }
+
     /// Append one chunk of format-encoded data.
     ///
     /// The bytes must be in the input format the stream was opened with. Chunk
@@ -162,6 +199,24 @@ impl<'a> InsertStream<'a> {
     /// Returns [`Error::QueryError`] if the stream has already failed — a
     /// malformed row in an earlier chunk, for instance — or was finalised.
     pub fn append(&mut self, data: &[u8]) -> Result<()> {
+        self.flush_pending()?;
+        self.send(data)
+    }
+
+    /// Hands anything gathered by `io::Write` to the engine.
+    fn flush_pending(&mut self) -> Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let pending = std::mem::take(&mut self.pending);
+        let sent = self.send(&pending);
+        // Keep the allocation for the next round of writes.
+        self.pending = pending;
+        self.pending.clear();
+        sent
+    }
+
+    fn send(&mut self, data: &[u8]) -> Result<()> {
         // Wraps chdb_stream_append.
         let state = unsafe {
             bindings::chdb_stream_append(
@@ -188,6 +243,8 @@ impl<'a> InsertStream<'a> {
     ///
     /// Returns [`Error::QueryError`] if the engine rejected any of the data.
     pub fn finish(mut self) -> Result<WriteStats> {
+        // If this fails `done` stays false, so Drop cancels the stream.
+        self.flush_pending()?;
         self.done = true;
 
         // Wraps chdb_stream_done. Returns a result that must be destroyed, and
@@ -232,18 +289,39 @@ impl Drop for InsertStream<'_> {
 /// Lets anything that writes bytes — `serde_json::to_writer`, `csv::Writer`,
 /// `write!` — feed the stream directly.
 ///
-/// Errors from [`append`](InsertStream::append) are surfaced as
+/// Writes are buffered (64 KiB by default, see
+/// [`InsertStream::with_write_buffer`]) before being sent, so a `writeln!` per row
+/// doesn't turn into a trip to the engine per row. Because of that, an error
+/// caused by a write can show up on a later `write`, on `flush`, or on
+/// [`InsertStream::finish`].
+///
+/// Errors are surfaced as
 /// [`std::io::ErrorKind::Other`] carrying the engine's message, because that is
 /// the only shape `io::Write` has for them.
 impl std::io::Write for InsertStream<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.append(buf)
-            .map(|()| buf.len())
-            .map_err(|e| std::io::Error::other(e.to_string()))
+        if self.pending.len() + buf.len() > self.write_buffer {
+            self.flush_pending().map_err(io_err)?;
+        }
+        if buf.len() >= self.write_buffer {
+            // Big enough to be worth sending as it is.
+            self.send(buf).map_err(io_err)?;
+        } else {
+            if self.pending.capacity() == 0 {
+                self.pending.reserve(self.write_buffer);
+            }
+            self.pending.extend_from_slice(buf);
+        }
+        Ok(buf.len())
     }
 
-    /// A no-op: the engine buffers, and there is nothing held on this side.
+    /// Sends anything buffered to the engine. [`InsertStream::finish`] does
+    /// this too, so calling it is only needed to surface errors early.
     fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        self.flush_pending().map_err(io_err)
     }
+}
+
+fn io_err(e: Error) -> std::io::Error {
+    std::io::Error::other(e.to_string())
 }
