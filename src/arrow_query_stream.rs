@@ -67,7 +67,7 @@ impl arrow::array::RecordBatchReader for ArrowReader {
 ///
 /// # Thread Safety
 ///
-/// While a borrowed stream is active, its [`Connection`](crate::connection::Connection)
+/// While a borrowed stream is active, its [`Connection`]
 /// is exclusively borrowed and cannot be used for other queries. This prevents concurrent
 /// access to a non-[`Sync`] handle. Streams from [`execute_stream_arrow`](crate::execute_stream_arrow)
 /// own their connection outright.

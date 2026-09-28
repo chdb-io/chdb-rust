@@ -33,7 +33,7 @@ enum QueryStreamConnection<'a> {
 ///
 /// # Thread Safety
 ///
-/// While a borrowed stream is active, its [`Connection`](crate::connection::Connection)
+/// While a borrowed stream is active, its [`Connection`]
 /// is exclusively borrowed and cannot be used for other queries. This prevents concurrent
 /// access to a non-[`Sync`] handle. Streams from [`execute_stream`](crate::execute_stream)
 /// own their connection outright.

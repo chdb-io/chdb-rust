@@ -581,7 +581,7 @@ impl Connection {
     #[cfg(feature = "arrow")]
     /// Register an Arrow C Data Interface stream for use with `ArrowStream('name')`.
     ///
-    /// Pass a raw `ArrowArrayStream*` (see [`ArrowStream`](crate::arrow_stream::ArrowStream)).
+    /// Pass a raw `ArrowArrayStream*` (see [`ArrowStream`]).
     /// Registered names are **not** ordinary tables; query them with the
     /// [`arrow_stream_table_sql`](crate::arrow_stream::arrow_stream_table_sql) helper, e.g.
     /// `SELECT * FROM ArrowStream('my_data')`.

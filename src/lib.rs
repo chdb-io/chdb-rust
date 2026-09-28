@@ -28,7 +28,7 @@
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 //! - **Query result streaming**: Read large result sets in chunks with constant memory
 //! - **Streaming INSERT** ([`insert_stream`]): push rows in chunks in any input format, with engine backpressure; the stream also implements [`std::io::Write`]
-//! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`](arrow_insert::insert_record_batch) via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
+//! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`] via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Arrow batch streaming** (with the `arrow` feature): Stream query results as `RecordBatch` values via the Arrow C Data Interface
 //! - **One-shot Arrow export** (with the `arrow` feature): take a whole result as one Arrow stream via [`connection::Connection::query_arrow`], with [`arrow_options::ArrowOptions`] controlling the type mapping on both the one-shot and streaming paths
 //! - **Thread-safe**: Connections and results can be safely sent between threads

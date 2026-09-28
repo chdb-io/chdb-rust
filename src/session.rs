@@ -576,7 +576,7 @@ impl Session {
         drop(self.conn.take());
     }
 
-    /// See [`insert_record_batch`](crate::arrow_insert::insert_record_batch).
+    /// See [`insert_record_batch`].
     #[cfg(feature = "arrow")]
     pub fn insert_record_batch(
         &self,
@@ -588,7 +588,7 @@ impl Session {
         insert_record_batch(self.connection(), dest_table, stream_name, batch, options)
     }
 
-    /// See [`insert_record_batch_direct`](crate::arrow_insert::insert_record_batch_direct).
+    /// See [`insert_record_batch_direct`].
     #[cfg(feature = "arrow")]
     pub fn insert_record_batch_direct(
         &self,
@@ -599,7 +599,7 @@ impl Session {
         insert_record_batch_direct(self.connection(), dest_table, batch, options)
     }
 
-    /// See [`insert_record_batches`](crate::arrow_insert::insert_record_batches).
+    /// See [`insert_record_batches`].
     #[cfg(feature = "arrow")]
     pub fn insert_record_batches(
         &self,
@@ -619,7 +619,7 @@ impl Session {
         )
     }
 
-    /// See [`insert_record_batch_reader`](crate::arrow_insert::insert_record_batch_reader).
+    /// See [`insert_record_batch_reader`].
     #[cfg(feature = "arrow")]
     pub fn insert_record_batch_reader(
         &self,
