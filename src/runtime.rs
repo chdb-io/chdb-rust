@@ -91,7 +91,7 @@ static SHUT_DOWN: AtomicBool = AtomicBool::new(false);
 /// # Errors
 ///
 /// Returns [`Error::ConnectionsStillOpen`] if any connection is open, and
-/// [`Error::Unknown`] if the engine could not stop every thread. In the
+/// [`Error::EngineCallFailed`] if the engine could not stop every thread. In the
 /// latter case `chdb.h` documents the engine as closed for the process
 /// regardless — "whether or not it manages to stop every thread" — so this
 /// error means the engine is already shut down even though it is reported as
@@ -130,7 +130,9 @@ pub fn shutdown() -> Result<()> {
     // other crate in this process holds one.
     let state = unsafe { bindings::chdb_shutdown() };
     if state != bindings::chdb_state_CHDBSuccess {
-        return Err(Error::Unknown);
+        return Err(Error::EngineCallFailed {
+            call: "chdb_shutdown",
+        });
     }
 
     SHUT_DOWN.store(true, Ordering::SeqCst);

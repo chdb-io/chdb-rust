@@ -174,7 +174,9 @@ impl<'a> InsertStream<'a> {
         if state != bindings::chdb_state_CHDBSuccess {
             // The state says only that it failed; the reason is on the stream.
             self.check_error()?;
-            return Err(Error::Unknown);
+            return Err(Error::EngineCallFailed {
+                call: "chdb_stream_append",
+            });
         }
 
         Ok(())

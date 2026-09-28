@@ -77,6 +77,17 @@ pub enum Error {
     #[error(transparent)]
     Durable(#[from] crate::durable::Error),
 
+    /// A chDB call reported failure without saying why.
+    ///
+    /// `call` names the C function, so the two cases this covers — a shutdown
+    /// that could not stop every engine thread, and an insert-stream append
+    /// that failed with no error recorded on the stream — can be told apart.
+    #[error("{call} failed without reporting a reason")]
+    EngineCallFailed {
+        /// The chDB C function that failed.
+        call: &'static str,
+    },
+
     /// A query execution error occurred.
     ///
     /// This contains the error message from the underlying chDB library,
@@ -107,3 +118,19 @@ pub enum Error {
 ///
 /// This is the standard result type used throughout the crate.
 pub type Result<T, Err = Error> = std::result::Result<T, Err>;
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn engine_call_failed_names_the_call() {
+        let err = Error::EngineCallFailed {
+            call: "chdb_shutdown",
+        };
+        assert_eq!(
+            err.to_string(),
+            "chdb_shutdown failed without reporting a reason"
+        );
+    }
+}
