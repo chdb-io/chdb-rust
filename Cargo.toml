@@ -145,7 +145,7 @@ required-features = ["arrow"]
 # Backup, restore and statement analysis first appeared one release earlier, in
 # v26.7.2-rc.2, which is still the oldest engine the durable features build
 # against.
-engine = "v26.7.3"
+engine = "v26.9.0"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.

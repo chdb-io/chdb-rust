@@ -4,6 +4,7 @@
 //! [`Connection::register_arrow_array`](crate::connection::Connection::register_arrow_array),
 //! and `INSERT INTO … SELECT * FROM ArrowStream('name')`.
 
+#[cfg(not(direct_arrow_insert))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow::array::RecordBatchReader;
@@ -18,6 +19,7 @@ use crate::connection::Connection;
 use crate::error::Result;
 use crate::format::OutputFormat;
 
+#[cfg(not(direct_arrow_insert))]
 static FALLBACK_STREAM_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Owns Arrow C Data Interface structs for the lifetime of a registration or insert.
@@ -201,7 +203,7 @@ pub fn insert_record_batch_direct(
     #[cfg(direct_arrow_insert)]
     {
         let _ = &columns;
-        return conn.insert_arrow_array(dest_table, &handles.schema(), &handles.array(), &options);
+        conn.insert_arrow_array(dest_table, &handles.schema(), &handles.array(), &options)
     }
 
     #[cfg(not(direct_arrow_insert))]
@@ -330,7 +332,7 @@ pub fn insert_record_batch_reader(
     #[cfg(direct_arrow_insert)]
     {
         let _ = (stream_name, &columns);
-        return conn.insert_arrow_stream(dest_table, &arrow_stream, &options);
+        conn.insert_arrow_stream(dest_table, &arrow_stream, &options)
     }
 
     #[cfg(not(direct_arrow_insert))]
