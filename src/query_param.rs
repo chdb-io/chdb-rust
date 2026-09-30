@@ -204,43 +204,71 @@ impl QueryParam {
     }
 
     fn encode_array(values: &[QueryParam]) -> Result<String> {
-        let mut parts = Vec::with_capacity(values.len());
-        for value in values {
-            parts.push(value.encode_nested()?.into_owned());
+        // Rough guess to avoid regrowing for typical numeric arrays.
+        let mut out = String::with_capacity(2 + values.len() * 8);
+        Self::write_array(values, &mut out)?;
+        Ok(out)
+    }
+
+    /// Writes an array literal straight into `out`, so an element never needs
+    /// a `String` of its own.
+    fn write_array(values: &[QueryParam], out: &mut String) -> Result<()> {
+        out.push('[');
+        for (i, value) in values.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            value.write_nested(out)?;
         }
-        Ok(format!("[{}]", parts.join(", ")))
+        out.push(']');
+        Ok(())
     }
 
-    /// Encode this value as an element inside an array/tuple/map literal.
-    fn encode_nested(&self) -> Result<Cow<'_, str>> {
-        Ok(match self {
-            Self::Null => Cow::Borrowed("NULL"),
-            Self::Bool(true) => Cow::Borrowed("true"),
-            Self::Bool(false) => Cow::Borrowed("false"),
-            Self::Int64(value) => Cow::Owned(value.to_string()),
-            Self::UInt64(value) => Cow::Owned(value.to_string()),
-            Self::Float64(value) => Cow::Owned(value.to_string()),
-            Self::Text(value) => Cow::Owned(Self::quote_nested_string(value)),
-            Self::Raw(value) => Cow::Borrowed(value),
-            Self::Array(values) => Cow::Owned(Self::encode_array(values)?),
-        })
+    /// Writes this value as an element inside an array/tuple/map literal.
+    fn write_nested(&self, out: &mut String) -> Result<()> {
+        use std::fmt::Write as _;
+        // Writing to a String cannot fail.
+        match self {
+            Self::Null => out.push_str("NULL"),
+            Self::Bool(true) => out.push_str("true"),
+            Self::Bool(false) => out.push_str("false"),
+            Self::Int64(value) => write!(out, "{value}").expect("writing to a String"),
+            Self::UInt64(value) => write!(out, "{value}").expect("writing to a String"),
+            Self::Float64(value) => write!(out, "{value}").expect("writing to a String"),
+            Self::Text(value) => Self::write_quoted(value, out),
+            Self::Raw(value) => out.push_str(value),
+            Self::Array(values) => Self::write_array(values, out)?,
+        }
+        Ok(())
     }
 
-    /// Quote `value` as an array or tuple element, escaping `\`, tab, newline, and `'`.
-    fn quote_nested_string(value: &str) -> String {
-        let mut encoded = String::with_capacity(value.len() + 2);
-        encoded.push('\'');
+    /// Quotes `value` as an array or tuple element, escaping `\`, tab, newline, and `'`.
+    fn write_quoted(value: &str, out: &mut String) {
+        out.reserve(value.len() + 2);
+        out.push('\'');
         for ch in value.chars() {
             match ch {
-                '\\' => encoded.push_str(r"\\"),
-                '\t' => encoded.push_str(r"\t"),
-                '\n' => encoded.push_str(r"\n"),
-                '\'' => encoded.push_str(r"\'"),
-                other => encoded.push(other),
+                '\\' => out.push_str(r"\\"),
+                '\t' => out.push_str(r"\t"),
+                '\n' => out.push_str(r"\n"),
+                '\'' => out.push_str(r"\'"),
+                other => out.push(other),
             }
         }
-        encoded.push('\'');
-        encoded
+        out.push('\'');
+    }
+
+    /// Like [`encode`](Self::encode) but consumes the value, so text that needs
+    /// no escaping, and raw literals, are moved out rather than copied.
+    fn into_encoded(self) -> Result<String> {
+        match self {
+            Self::Text(value) => match Self::encode_text(&value) {
+                Cow::Borrowed(_) => Ok(value),
+                Cow::Owned(escaped) => Ok(escaped),
+            },
+            Self::Raw(value) => Ok(value),
+            other => Ok(other.encode()?.into_owned()),
+        }
     }
 }
 
@@ -263,18 +291,20 @@ pub(crate) struct EncodedParams {
 
 impl EncodedParams {
     pub(crate) fn encode(params: impl Into<QueryParams>) -> Result<Self> {
-        let params = params.into();
-        let mut name_bufs = Vec::new();
-        let mut value_bufs = Vec::new();
+        let params = params.into().into_iter();
+        let n = params.len();
+        let mut name_bufs = Vec::with_capacity(n);
+        let mut value_bufs = Vec::with_capacity(n);
 
+        // Names and values are moved in. For text that needs no escaping, and
+        // for raw literals, that means the caller's String is reused as is.
         for (name, param) in params {
-            let encoded = param.encode()?;
             name_bufs.push(name.into_bytes());
-            value_bufs.push(encoded.as_ref().as_bytes().to_vec());
+            value_bufs.push(param.into_encoded()?.into_bytes());
         }
 
-        let name_lens: Vec<usize> = name_bufs.iter().map(|b| b.len()).collect();
-        let value_lens: Vec<usize> = value_bufs.iter().map(|b| b.len()).collect();
+        let name_lens = name_bufs.iter().map(Vec::len).collect();
+        let value_lens = value_bufs.iter().map(Vec::len).collect();
         let name_ptrs = name_bufs
             .iter()
             .map(|b| b.as_ptr() as *const c_char)
@@ -451,6 +481,24 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn plain_text_and_raw_values_are_moved_not_copied() -> Result<()> {
+        let text = String::from("no escaping needed here");
+        let ptr = text.as_ptr();
+        let encoded = QueryParam::Text(text).into_encoded()?;
+        assert_eq!(encoded.as_ptr(), ptr);
+
+        let raw = String::from("(7, 'x')");
+        let ptr = raw.as_ptr();
+        let encoded = QueryParam::Raw(raw).into_encoded()?;
+        assert_eq!(encoded.as_ptr(), ptr);
+
+        // Text that needs escaping still gets a new, escaped string.
+        assert_eq!(QueryParam::Text("a\tb".into()).into_encoded()?, r"a\tb");
+        Ok(())
+    }
+
     use super::*;
 
     #[test]
