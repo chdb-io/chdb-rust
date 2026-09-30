@@ -95,7 +95,7 @@ pub mod durable;
 pub mod error;
 pub mod format;
 pub mod insert_stream;
-pub use insert_stream::{InsertStream, WriteStats};
+pub use insert_stream::{InsertStream, WriteStats, DEFAULT_WRITE_BUFFER};
 pub mod log_level;
 pub mod query_param;
 pub mod query_result;
