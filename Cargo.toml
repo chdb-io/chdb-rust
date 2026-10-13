@@ -139,13 +139,11 @@ required-features = ["arrow"]
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.
 #
-# Release gate: this crate does not publish against a release candidate. The pin
-# is v26.7.3, the first stable release carrying the Durable V1 ABI, so that gate
-# is met and a publish can go ahead once the test matrix has run against it.
-# Backup, restore and statement analysis first appeared one release earlier, in
-# v26.7.2-rc.2, which is still the oldest engine the durable features build
-# against.
-engine = "v26.7.3"
+# Release gate: this crate does not publish against a release candidate. This
+# pin tests v26.9.2-rc.2 in CI; switch to a stable engine and rerun the matrix
+# before publishing the crate. Backup, restore and statement analysis require
+# v26.7.2-rc.2 or newer.
+engine = "v26.9.2-rc.2"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.
