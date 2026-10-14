@@ -771,10 +771,8 @@ impl Connection {
         options: &InsertOptions,
     ) -> Result<()> {
         let dest_cstr = CString::new(dest_table)?;
-        let (options_ptr, _settings) = build_insert_options_c(options)?;
-
         let conn = unsafe { *self.inner };
-        let result_ptr = unsafe {
+        let result_ptr = with_insert_options(options, |options_ptr| unsafe {
             bindings::chdb_insert_arrow_array(
                 conn,
                 dest_cstr.as_ptr(),
@@ -782,7 +780,7 @@ impl Connection {
                 arrow_array.as_c(),
                 options_ptr,
             )
-        };
+        })?;
 
         check_insert_result(result_ptr)
     }
@@ -798,26 +796,25 @@ impl Connection {
         options: &InsertOptions,
     ) -> Result<()> {
         let dest_cstr = CString::new(dest_table)?;
-        let (options_ptr, _settings) = build_insert_options_c(options)?;
-
         let conn = unsafe { *self.inner };
-        let result_ptr = unsafe {
+        let result_ptr = with_insert_options(options, |options_ptr| unsafe {
             bindings::chdb_insert_arrow_stream(
                 conn,
                 dest_cstr.as_ptr(),
                 arrow_stream.as_c(),
                 options_ptr,
             )
-        };
+        })?;
 
         check_insert_result(result_ptr)
     }
 }
 
 #[cfg(all(feature = "arrow", direct_arrow_insert))]
-fn build_insert_options_c(
+fn with_insert_options<T>(
     options: &InsertOptions,
-) -> Result<(*const bindings::chdb_arrow_insert_options, Option<CString>)> {
+    call: impl FnOnce(*const bindings::chdb_arrow_insert_options) -> T,
+) -> Result<T> {
     let settings_cstr = options.settings_clause().map(CString::new).transpose()?;
     let c_options = settings_cstr
         .as_ref()
@@ -828,7 +825,9 @@ fn build_insert_options_c(
         .as_ref()
         .map(|opts| opts as *const bindings::chdb_arrow_insert_options)
         .unwrap_or(std::ptr::null());
-    Ok((options_ptr, settings_cstr))
+    // Both the C struct and the string it points to remain alive until the
+    // synchronous FFI call returns. Returning options_ptr would dangle.
+    Ok(call(options_ptr))
 }
 
 #[cfg(all(feature = "arrow", direct_arrow_insert))]
@@ -873,6 +872,25 @@ impl Drop for Connection {
 mod test {
     use super::*;
     use crate::{error::Result, test_utils::tempdir};
+
+    #[cfg(all(feature = "arrow", direct_arrow_insert))]
+    #[test]
+    fn direct_insert_options_live_through_the_call() -> Result<()> {
+        let settings = with_insert_options(&InsertOptions::default_bulk(), |options| {
+            assert!(!options.is_null());
+            // The callback models the synchronous C call reading both pointers.
+            unsafe { std::ffi::CStr::from_ptr((*options).settings) }
+                .to_str()
+                .unwrap()
+                .to_owned()
+        })?;
+        assert_eq!(settings, "max_threads = 4");
+
+        with_insert_options(&InsertOptions::default(), |options| {
+            assert!(options.is_null());
+        })?;
+        Ok(())
+    }
 
     #[test]
     fn test_connection_open_with_explicit_data_path() -> Result<()> {
