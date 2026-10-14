@@ -1,15 +1,15 @@
-//! The bundled C++ runtime must not be visible from outside the archive.
+//! The bundled C++ runtime must not capture symbols used by the host runtime.
 //!
-//! This is the cause the runtime cases in `runtime_faces.rs` observe the effect
-//! of, checked directly and without linking anything.
+//! The runtime cases in `runtime_faces.rs` check the effect in a linked binary;
+//! this checks the archive's symbols directly.
 //!
 //! `libchdb.so` / `.dylib` gate their exports at link time, with a version
 //! script on Linux and an exported-symbols list on macOS, which is why dynamic
 //! linking never had this problem. An archive has no link step of its own: every
 //! symbol it carries reaches the final artifact and takes part in resolution. So
-//! for a static build the gate has to be compiled into the objects, and this
-//! asserts that it was — that the three bundled runtime targets have no
-//! externally visible definitions at all.
+//! for a static build the gate must be baked into the archive. Older archives
+//! hide the bundled runtime's definitions, while newer ones prelink and localize
+//! them on Linux or rename them on macOS.
 //!
 //! Two reasons to check the cause and not only the effect. It holds on Linux,
 //! where the visibility can regress with no symptom to observe, so no runtime
@@ -20,9 +20,8 @@
 //! over its own build output (`chdb/build/check_static_lib_hermetic.sh`, gate
 //! 2). That one guards the release; this one guards what actually arrived.
 //!
-//! Measured across the engines this crate has been pinned to: v26.7.0 shows
-//! 2365 externally visible definitions among 58 runtime members, and
-//! v26.7.2-rc.2 and v26.7.3 show 0 among the same 58.
+//! Measured across older engines: v26.7.0 shows 2365 externally visible
+//! definitions among 58 runtime members, and v26.7.2-rc.2/v26.7.3 show 0.
 
 mod common;
 
@@ -37,7 +36,7 @@ const RUNTIME_MEMBER_PREFIXES: [&str; 3] = ["libcxx__", "libcxxabi__", "libunwin
 const OFFENDERS_SHOWN: usize = 20;
 
 #[test]
-fn bundled_runtime_objects_export_nothing() {
+fn bundled_runtime_symbols_cannot_bind_host() {
     let artifact = Path::new(env!("CHDB_LINKED_ARTIFACT"));
     assert!(
         !artifact.as_os_str().is_empty(),
@@ -54,13 +53,33 @@ fn bundled_runtime_objects_export_nothing() {
     }
 
     let members = runtime_members(artifact);
-    // Zero would mean the naming changed and this test had quietly stopped
-    // testing anything, which is worse than a failure.
-    assert!(
-        !members.is_empty(),
-        "no {RUNTIME_MEMBER_PREFIXES:?} members among the archive's members: either the \
-         bundled runtime is no longer a separate set of objects, or chdb-core renamed them"
-    );
+    if members.is_empty() {
+        // New Linux archives prelink all objects into one member and localize
+        // everything outside the C API. The old per-runtime-member check no
+        // longer describes that layout; verify its exported surface here and
+        // exercise the host unwinder in runtime_faces.
+        let all_members = run("ar", &[OsStr::new("t"), artifact.as_os_str()], None);
+        let names: Vec<_> = all_members.lines().collect();
+        assert!(
+            cfg!(target_os = "linux")
+                && names.len() == 1
+                && names[0].starts_with("libchdb")
+                && names[0].ends_with(".o"),
+            "unknown static archive layout: {names:?}"
+        );
+        let (defined, visible) = symbols(&[artifact.to_path_buf()]);
+        assert!(defined > 0 && visible.iter().any(|name| name == "chdb_connect"));
+        assert!(
+            visible.len() <= 100
+                && !visible.iter().any(|name| {
+                    name.starts_with("_Unwind_")
+                        || name.starts_with("unw_")
+                        || name.starts_with("__cxa_")
+                }),
+            "prelinked archive exports unexpected runtime symbols: {visible:?}"
+        );
+        return;
+    }
 
     let scratch = common::tempdir();
     let objects = extract(artifact, &members, scratch.path());
@@ -91,15 +110,14 @@ fn bundled_runtime_objects_export_nothing() {
         }
     }
 
-    // Asserted at zero rather than "disjoint from this host's system runtime".
-    // These targets are built to have no externally visible definitions at all,
-    // and a symbol that merely happens to be absent from the running OS version
-    // would otherwise slip through.
+    // The old layout hides these definitions; the new macOS layout renames
+    // every one so a host can never resolve a runtime reference to it.
     assert!(
-        visible.is_empty(),
+        visible.is_empty()
+            || (cfg!(target_os = "macos") && visible.iter().all(|s| s.ends_with(".chdb"))),
         "{} of {} definitions in the bundled runtime are visible from outside the \
-         archive; a static build can then bind a call made inside the engine to \
-         another copy of the C++ runtime",
+         archive under an unrenamed name; a static build can then bind a host \
+         runtime call to the bundled C++ runtime",
         visible.len(),
         defined
     );

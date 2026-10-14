@@ -166,6 +166,21 @@ fn cases() -> Vec<Case> {
         run: arrow_release_callback,
     });
 
+    // chdb-io/chdb-rust#53: an archive may keep the engine working while
+    // breaking the host Rust runtime's unwinder. Exercise the real consumer
+    // after a failing engine query, isolated so a SIGSEGV cannot hide the
+    // outcome of the other runtime cases.
+    #[cfg(feature = "static")]
+    if std::env::var_os("CHDB_CHECK_HOST_UNWIND").is_some() {
+        // The current pin predates chdb-core's fix. Opt in when validating a
+        // candidate archive, and enable by default only after adopting it.
+        cases.push(Case {
+            name: "host_backtrace_and_panic",
+            expect: "backtrace=ok|panic=ok\n",
+            run: host_backtrace_and_panic,
+        });
+    }
+
     cases
 }
 
@@ -487,6 +502,25 @@ fn signal_handlers_before_connect() {
         .expect("query");
     assert_eq!(result.data_utf8_lossy().trim(), "1");
     println!("ok");
+}
+
+#[cfg(feature = "static")]
+fn host_backtrace_and_panic() {
+    chdb_rust::runtime::signal_handlers(false);
+    let conn = Connection::open_in_memory().expect("open");
+    assert!(conn
+        .query("SELECT * FROM chdb_rust_missing_table", OutputFormat::CSV)
+        .is_err());
+
+    let trace = std::backtrace::Backtrace::force_capture();
+    assert_eq!(trace.status(), std::backtrace::BacktraceStatus::Captured);
+    assert!(!trace.to_string().trim().is_empty());
+    print!("backtrace=ok|");
+
+    std::panic::set_hook(Box::new(|_| {}));
+    assert!(std::panic::catch_unwind(|| panic!("expected panic")).is_err());
+    drop(conn);
+    println!("panic=ok");
 }
 
 /// The deadly-signal disposition for `sig`, read via `sigaction` with a null

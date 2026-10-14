@@ -1,0 +1,130 @@
+name: Check chdb-core main artifacts
+
+# A one-off, pre-release consumer check. The normal Rust workflow continues to
+# test its release pin; this one tests four CI artifacts from the same core SHA.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/core-main-artifact-check.yml
+      - tests/bundled_runtime_hidden.rs
+      - tests/runtime_faces.rs
+
+permissions:
+  contents: read
+
+jobs:
+  main_artifacts:
+    if: github.head_ref == 'codex/chdb-core-26.9.2-rc.2'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            run_id: '38427250828'
+            artifact: chdb-artifacts-linux-x86_64
+            asset_prefix: linux-x86_64
+          - os: ubuntu-24.04-arm
+            run_id: '38429301339'
+            artifact: chdb-artifacts-linux-aarch64
+            asset_prefix: linux-aarch64
+          - os: macos-latest
+            run_id: '38427008431'
+            artifact: chdb-artifacts-macos-arm64
+            asset_prefix: macos-arm64
+            test_min_macos: '12.0'
+          - os: macos-15-intel
+            run_id: '38428913578'
+            artifact: chdb-artifacts-macos-x86_64
+            asset_prefix: macos-x86_64
+            test_min_macos: '12.0'
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+      CORE_SHA: dec391dcdf788cbecede338a0f305b399d8495e1
+      CORE_RUN_ID: ${{ matrix.run_id }}
+      CORE_ARTIFACT: ${{ matrix.artifact }}
+      ASSET_PREFIX: ${{ matrix.asset_prefix }}
+      CHDB_TEST_MIN_MACOS: ${{ matrix.test_min_macos }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify source and fetch the exact CI artifact
+        env:
+          # A read-only fine-grained token for chdb-core Actions can be added
+          # as this secret if the Rust repository's token cannot read it.
+          GH_TOKEN: ${{ secrets.CHDB_CORE_ARTIFACT_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          actual=$(gh run view "$CORE_RUN_ID" -R chdb-io/chdb-core \
+            --json headSha,conclusion,headBranch \
+            --jq '[.headSha,.conclusion,.headBranch] | join(" ")')
+          if [ "$actual" != "$CORE_SHA success main" ]; then
+            echo "::error::core run $CORE_RUN_ID is '$actual', expected '$CORE_SHA success main'"
+            exit 1
+          fi
+          gh run download "$CORE_RUN_ID" -R chdb-io/chdb-core \
+            -n "$CORE_ARTIFACT" -D "$RUNNER_TEMP/core-artifact"
+
+      - name: Unpack matching native libraries and headers
+        run: |
+          set -euo pipefail
+          DYNAMIC_DIR="$RUNNER_TEMP/core-dynamic"
+          STATIC_DIR="$RUNNER_TEMP/core-static"
+          mkdir -p "$DYNAMIC_DIR" "$STATIC_DIR"
+          tar -xzf "$RUNNER_TEMP/core-artifact/$ASSET_PREFIX-libchdb.tar.gz" -C "$DYNAMIC_DIR"
+          tar -xzf "$RUNNER_TEMP/core-artifact/$ASSET_PREFIX-libchdb-static.tar.gz" -C "$STATIC_DIR"
+          test -s "$DYNAMIC_DIR/libchdb.so"
+          test -s "$STATIC_DIR/libchdb.a"
+          cmp "$DYNAMIC_DIR/chdb.h" "$STATIC_DIR/chdb.h"
+          echo "Using chdb-core $CORE_SHA: $CORE_ARTIFACT from run $CORE_RUN_ID"
+
+      - name: Check formatting and dynamic Clippy
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CHDB_LIB_DIR: ${{ runner.temp }}/core-dynamic
+          CHDB_INCLUDE_DIR: ${{ runner.temp }}/core-dynamic
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- --deny warnings
+
+      - name: Build and test dynamic library
+        env:
+          CHDB_LIB_DIR: ${{ runner.temp }}/core-dynamic
+          CHDB_INCLUDE_DIR: ${{ runner.temp }}/core-dynamic
+          LD_LIBRARY_PATH: ${{ runner.temp }}/core-dynamic
+          DYLD_LIBRARY_PATH: ${{ runner.temp }}/core-dynamic
+          RUST_BACKTRACE: full
+        run: |
+          cargo build --verbose
+          cargo test -- --test-threads=1
+          cargo test --features durable -- --test-threads=1
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ARCH" = X64 ]; then
+            cargo test --features durable-s3 --lib -- --test-threads=1 durable::backends
+          fi
+
+      - name: Check all-feature Clippy against the static archive
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CHDB_LIB_DIR: ${{ runner.temp }}/core-static
+          CHDB_INCLUDE_DIR: ${{ runner.temp }}/core-static
+        run: cargo clippy --all-targets --all-features -- --deny warnings
+
+      - name: Build, inspect and run statically linked tests
+        env:
+          CHDB_LIB_DIR: ${{ runner.temp }}/core-static
+          CHDB_INCLUDE_DIR: ${{ runner.temp }}/core-static
+          CHDB_CHECK_HOST_UNWIND: '1'
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo test --features static --no-run --tests -j 2 --message-format=json > "$RUNNER_TEMP/artifacts.json"
+          jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null)
+                 | .executable' "$RUNNER_TEMP/artifacts.json" > "$RUNNER_TEMP/test-binaries.txt"
+          test -s "$RUNNER_TEMP/test-binaries.txt"
+          xargs .github/scripts/check-static-link.sh < "$RUNNER_TEMP/test-binaries.txt"
+          while read -r binary <&3; do
+            echo "== $binary"
+            "$binary" --test-threads=1 < /dev/null
+          done 3< "$RUNNER_TEMP/test-binaries.txt"
+          cargo test --features static --doc
