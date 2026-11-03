@@ -140,10 +140,10 @@ required-features = ["arrow"]
 # update_libchdb.sh, which are what actually fetch the engine.
 #
 # Release gate: this crate does not publish against a release candidate. This
-# pin tests v26.9.2-rc.2 in CI; switch to a stable engine and rerun the matrix
+# pin tests v26.11.0-rc.1 in CI; switch to a stable engine and rerun the matrix
 # before publishing the crate. Backup, restore and statement analysis require
 # v26.7.2-rc.2 or newer.
-engine = "v26.9.2-rc.2"
+engine = "v26.11.0-rc.1"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.
