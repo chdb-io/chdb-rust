@@ -1,6 +1,6 @@
 [package]
 name = "chdb-rust"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 authors = ["Auxten"]
 description = "chDB FFI bindings for Rust(Experimental)"
@@ -130,7 +130,7 @@ required-features = ["arrow"]
 # rather than a ClickHouse 26.7.0. The chdb-core release notes for the tag name
 # the exact upstream build.
 #
-# The crate version above is unrelated — 2.0.0 is this crate's own numbering — so
+# The crate version above is unrelated — 2.1.0 is this crate's own numbering — so
 # without this key there is no way to tell which engine a published version
 # carries short of reading build.rs at the matching tag. Here it travels with the
 # package, readable through `cargo metadata`, the .crate archive or the docs.rs
@@ -139,10 +139,8 @@ required-features = ["arrow"]
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.
 #
-# Release gate: this crate does not publish against a release candidate. This
-# pin tests v26.11.0-rc.2 in CI; switch to a stable engine and rerun the matrix
-# before publishing the crate. Backup, restore and statement analysis require
-# v26.7.2-rc.2 or newer.
+# This pin is the v26.11.0-rc.2 release candidate, which 2.1.0 is published
+# against. Backup, restore and statement analysis require v26.7.2-rc.2 or newer.
 engine = "v26.11.0-rc.2"
 
 [package.metadata.docs.rs]

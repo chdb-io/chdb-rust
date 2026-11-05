@@ -24,7 +24,7 @@ First, add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "1.0.0"
+chdb-rust = "2.1"
 ```
 
 Make sure you have `libchdb` installed on your system. See the main README for installation instructions.
