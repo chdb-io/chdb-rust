@@ -40,7 +40,7 @@
 //! pin whose Linux archive is prelinked: one member, `libchdb.o`, whose 68 global
 //! definitions are all C API and none of them the runtime's, on x86_64 and
 //! aarch64 alike. Its macOS archive keeps the member layout, with 0 visible
-//! among 59.
+//! among 59. v26.11.0-rc.2 measures the same on all three.
 
 mod common;
 
