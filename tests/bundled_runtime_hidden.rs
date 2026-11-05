@@ -20,9 +20,27 @@
 //! over its own build output (`chdb/build/check_static_lib_hermetic.sh`, gate
 //! 2). That one guards the release; this one guards what actually arrived.
 //!
+//! The archive arrives in one of two layouts, and the check follows it:
+//!
+//! - Separate runtime members, `libcxx__*`, `libcxxabi__*` and `libunwind__*`,
+//!   compiled hidden. Those members must have no externally visible definitions.
+//!   This is the macOS archive, and the Linux one before chdb-core#261.
+//! - Prelinked, on Linux since chdb-core#261. Hidden turned out not to be
+//!   enough: a hidden definition in an archive member still satisfies a
+//!   reference from any other object in the consumer's link, which is how
+//!   Rust's std ended up calling the bundled libunwind (chdb-rust#53). So the
+//!   archive is now one relocatable object, made by `ld -r`, that keeps only the
+//!   C API global. There are no runtime members left to name, so the runtime is
+//!   looked for inside that object instead, and none of it may be global at any
+//!   visibility.
+//!
 //! Measured across the engines this crate has been pinned to: v26.7.0 shows
 //! 2365 externally visible definitions among 58 runtime members, and
-//! v26.7.2-rc.2 and v26.7.3 show 0 among the same 58.
+//! v26.7.2-rc.2 and v26.7.3 show 0 among the same 58. v26.11.0-rc.1 is the first
+//! pin whose Linux archive is prelinked: one member, `libchdb.o`, whose 68 global
+//! definitions are all C API and none of them the runtime's, on x86_64 and
+//! aarch64 alike. Its macOS archive keeps the member layout, with 0 visible
+//! among 59. v26.11.0-rc.2 measures the same on all three.
 
 mod common;
 
@@ -32,6 +50,16 @@ use std::path::{Path, PathBuf};
 /// The archive members holding the bundled runtime, by the naming chdb-core's
 /// `create_static_libchdb.py` gives them.
 const RUNTIME_MEMBER_PREFIXES: [&str; 3] = ["libcxx__", "libcxxabi__", "libunwind__"];
+
+/// One definition from each bundled runtime — libc++, libc++abi, libunwind — by
+/// which a prelinked archive shows it still carries the runtime. Without them a
+/// clean result could equally mean the runtime is gone, or that the symbol table
+/// was stripped, and the test would have quietly stopped testing anything.
+const RUNTIME_ANCHORS: [&str; 3] = [
+    "_ZNSt3__15mutex4lockEv",
+    "__cxa_throw",
+    "_Unwind_RaiseException",
+];
 
 /// How many offending symbols to print before giving up on the reader.
 const OFFENDERS_SHOWN: usize = 20;
@@ -54,6 +82,12 @@ fn bundled_runtime_objects_export_nothing() {
     }
 
     let members = runtime_members(artifact);
+    // Only the Linux archive is prelinked; the macOS one keeps its members and
+    // is hardened by renaming instead, so there the old check still applies.
+    if members.is_empty() && cfg!(target_os = "linux") {
+        prelinked_runtime_is_local(artifact);
+        return;
+    }
     // Zero would mean the naming changed and this test had quietly stopped
     // testing anything, which is worse than a failure.
     assert!(
@@ -103,6 +137,114 @@ fn bundled_runtime_objects_export_nothing() {
         visible.len(),
         defined
     );
+}
+
+/// The prelinked layout: the whole engine as one relocatable object, with the
+/// runtime inside it.
+///
+/// Every binding that takes part in resolution counts — `GLOBAL`, `WEAK` and
+/// `UNIQUE` — at every visibility, since hidden is exactly what failed to keep
+/// the runtime out of the consumer's link. Only `LOCAL` is out of reach.
+fn prelinked_runtime_is_local(artifact: &Path) {
+    let listing = run("readelf", &[OsStr::new("-sW"), artifact.as_os_str()], None);
+
+    let mut anchors = Vec::new();
+    let mut globals = Vec::new();
+    for line in listing.lines() {
+        // Millions of lines, nearly all of them LOCAL definitions that matter
+        // only when they are an anchor. A substring test turns those away before
+        // the line is split, which in a debug build is most of the cost.
+        let global_binding = [" GLOBAL ", " WEAK ", " UNIQUE "]
+            .iter()
+            .any(|bind| line.contains(bind));
+        if !global_binding && !RUNTIME_ANCHORS.iter().any(|anchor| line.ends_with(anchor)) {
+            continue;
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        // Num: Value Size Type Bind Vis Ndx Name. Ndx and Name are read from the
+        // end, because aarch64 can put a [VARIANT_PCS] marker after Vis. The
+        // numeric index keeps the column header line out.
+        if fields.len() < 8
+            || fields[0]
+                .strip_suffix(':')
+                .is_none_or(|index| index.parse::<u64>().is_err())
+        {
+            continue;
+        }
+        let bind = fields[4];
+        let (ndx, name) = (fields[fields.len() - 2], fields[fields.len() - 1]);
+        if ndx == "UND" {
+            continue;
+        }
+        let name = name.split('@').next().unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        if RUNTIME_ANCHORS.contains(&name) {
+            anchors.push(name.to_owned());
+        }
+        if matches!(bind, "GLOBAL" | "WEAK" | "UNIQUE") {
+            globals.push(name.to_owned());
+        }
+    }
+
+    for names in [&mut anchors, &mut globals] {
+        names.sort_unstable();
+        names.dedup();
+    }
+    let runtime: Vec<&String> = globals
+        .iter()
+        .filter(|name| in_runtime_namespace(name))
+        .collect();
+
+    println!(
+        "{}: prelinked, runtime anchors {:?}, {} global definitions, {} of them in the \
+         runtime's namespace",
+        artifact.display(),
+        anchors,
+        globals.len(),
+        runtime.len()
+    );
+    for symbol in runtime.iter().take(OFFENDERS_SHOWN) {
+        println!("  {symbol}");
+    }
+    if runtime.len() > OFFENDERS_SHOWN {
+        println!("  ... and {} more", runtime.len() - OFFENDERS_SHOWN);
+    }
+
+    assert_eq!(
+        anchors.len(),
+        RUNTIME_ANCHORS.len(),
+        "the archive has no {RUNTIME_MEMBER_PREFIXES:?} members and defines only {anchors:?} \
+         of {RUNTIME_ANCHORS:?}: either it no longer bundles the runtime, or its symbol \
+         table was stripped, and there is nothing left here to check"
+    );
+    // The C API has to be global for anything to link at all, so none means the
+    // listing was not understood rather than that the archive is clean.
+    assert!(
+        !globals.is_empty(),
+        "readelf reported no global definitions in {}",
+        artifact.display()
+    );
+    assert!(
+        runtime.is_empty(),
+        "{} of {} global definitions in the prelinked archive belong to the C++ runtime; a \
+         static build then binds the consumer's own runtime references to the engine's copy",
+        runtime.len(),
+        globals.len()
+    );
+}
+
+/// Whether `name` has the shape of a C++ runtime symbol.
+///
+/// Everything libc++ defines is mangled, `_Z…`. libc++abi's entry points are
+/// `__cxa_*`, `__gxx_personality_v0` and `__dynamic_cast`; libunwind's are
+/// `_Unwind_*`, `__unw_*` and `__register_frame`. All of those are reserved
+/// identifiers, beginning with an underscore. The one exception is libunwind's
+/// public `unw_*` API. No C API name has either shape, so this needs no list of
+/// it to tell the two apart.
+fn in_runtime_namespace(name: &str) -> bool {
+    name.starts_with('_') || name.starts_with("unw_")
 }
 
 /// Runs `program`, requiring it to succeed, and returns its stdout.
