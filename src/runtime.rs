@@ -82,8 +82,15 @@ static SHUT_DOWN: AtomicBool = AtomicBool::new(false);
 ///
 /// Call this before a host teardown sequence of its own — global destructors, a
 /// finalizing language runtime, a sanitizer exit handler — which would
-/// otherwise race the engine's still-running threads. A process that simply
-/// exits does not need it.
+/// otherwise race the engine's still-running threads.
+///
+/// A plain exit needs care too. Exiting with a connection still open leaves the
+/// engine to be torn down from inside `exit`, and if MergeTree merges are
+/// running in the background at that point the process can crash on its way
+/// out. Drop every connection before the process exits, and call this after the
+/// last one is gone: it returns only once no chDB thread is left. Two common
+/// ways a Rust program keeps a connection open at exit: [`std::process::exit`]
+/// runs no destructors, and a connection held in a `static` is never dropped.
 ///
 /// This is one-way. Once it succeeds, no further connection can be opened in
 /// this process. Calling it again is harmless.
@@ -114,8 +121,8 @@ pub fn shutdown() -> Result<()> {
 
     // This count is a snapshot: a connect or drop can race it before
     // chdb_shutdown below runs. That window only sharpens the error message,
-    // it cannot corrupt state — chdb.h (1078-1080) guarantees chdb_shutdown is
-    // safe to call concurrently with chdb_connect because callers are
+    // it cannot corrupt state — chdb.h's chdb_shutdown documentation guarantees
+    // it is safe to call concurrently with chdb_connect because callers are
     // serialized, so a racing connect either gets in first and is counted, or
     // arrives later and is refused. Worst case here is a less specific error
     // (falling through to chdb_shutdown's own refusal) rather than this

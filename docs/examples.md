@@ -653,7 +653,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Call `shutdown` before a host teardown sequence of its own — global destructors, a finalizing language runtime, a sanitizer exit handler. A process that simply exits does not need it. Once it succeeds, no further connection can be opened in this process.
+Call `shutdown` before a host teardown sequence of its own — global destructors, a finalizing language runtime, a sanitizer exit handler. A plain exit needs care too: exiting with a connection still open while MergeTree merges run in the background can crash the process on its way out. Drop every connection before the process exits, and call `shutdown` after the last one is gone. `std::process::exit` runs no destructors, and a connection held in a `static` is never dropped. Once `shutdown` succeeds, no further connection can be opened in this process.
 
 See `examples/16_runtime.rs` for a runnable program.
 
