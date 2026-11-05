@@ -41,7 +41,7 @@ Add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "1.1.0"
+chdb-rust = "2.1"
 ```
 
 The library will automatically download the required `libchdb` binary during the build process.
@@ -308,7 +308,7 @@ use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
 SQL-only users can disable it to avoid building Arrow:
 
 ```toml
-chdb-rust = { version = "2.0", default-features = false }
+chdb-rust = { version = "2.1", default-features = false }
 ```
 
 See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:
