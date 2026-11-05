@@ -154,6 +154,16 @@ fn cases() -> Vec<Case> {
             expect: "shutdown|refused|idempotent\n",
             run: connect_after_shutdown_is_refused,
         },
+        // MergeTree merges on background executors of its own, and a shutdown
+        // has to stop those too. Up to chdb-core v26.11.0-rc.1 it could not:
+        // once a MergeTree table had been used, chdb_shutdown refused with
+        // "global thread pool did not become idle". It is also the sequence the
+        // shutdown docs ask for before a plain exit, run while merges are busy.
+        Case {
+            name: "shutdown_after_mergetree_merges",
+            expect: "rows=200000|closed|shutdown\n",
+            run: shutdown_after_mergetree_merges,
+        },
     ];
 
     // The release callback in the Arrow C Data Interface frees memory that was
@@ -597,6 +607,52 @@ fn connect_after_shutdown_is_refused() {
     // The engine treats a repeat shutdown as success, and so does this.
     chdb_rust::runtime::shutdown().expect("second shutdown is a no-op");
     println!("idempotent");
+}
+
+/// Twenty inserts leave twenty parts, so the background merges have work when
+/// the session is dropped. Then the engine is shut down and the process exits.
+fn shutdown_after_mergetree_merges() {
+    let dir = scratch_dir("mergetree-shutdown");
+    let session = SessionBuilder::new()
+        .with_data_path(&dir)
+        .with_auto_cleanup(true)
+        .build()
+        .expect("session");
+
+    session
+        .execute("CREATE DATABASE IF NOT EXISTS d", None)
+        .expect("create database");
+    session
+        .execute(
+            "CREATE TABLE d.t (x UInt64, s String) ENGINE = MergeTree ORDER BY x",
+            None,
+        )
+        .expect("create table");
+    for part in 0..20 {
+        session
+            .execute(
+                &format!(
+                    "INSERT INTO d.t SELECT number + {}, repeat('x', 100) FROM numbers(10000)",
+                    part * 10000
+                ),
+                None,
+            )
+            .expect("insert");
+    }
+    let rows = session
+        .execute("SELECT count() FROM d.t", None)
+        .expect("count")
+        .data_utf8()
+        .expect("utf-8")
+        .trim_end()
+        .to_owned();
+    print!("rows={rows}|");
+
+    drop(session);
+    print!("closed|");
+
+    chdb_rust::runtime::shutdown().expect("shutdown after MergeTree merges");
+    println!("shutdown");
 }
 
 /// A scratch directory named `suffix`, removed if a previous run left one.
