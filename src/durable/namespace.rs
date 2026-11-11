@@ -119,13 +119,15 @@ fn s3_location(url: &str) -> Result<(String, String)> {
         ));
     }
     // `user:secret@bucket` is the one shape that must not be accepted quietly.
-    // An `@` cannot appear in a bucket name, so the whole authority would have
-    // been taken as one, and the credential would then travel wherever the
-    // location does: `Namespace::location`, `Backend::describe`, every error
-    // built from it, and the request path itself. Refused rather than stripped,
+    // Neither `@` nor `:` can appear in a bucket name, so the whole authority
+    // would have been taken as one, and the credential would then travel
+    // wherever the location does: `Namespace::location`, `Backend::describe`,
+    // every error built from it, and the request path itself. `:` as well as
+    // `@`, because a secret key may contain `/`, which ends the bucket at
+    // `user:sec` before the `@` is reached. Refused rather than stripped,
     // because a caller who put credentials here believes they are being used.
     // The message deliberately quotes neither the URL nor the userinfo.
-    if bucket.contains('@') {
+    if bucket.contains(['@', ':']) {
         return Err(err(
             Category::Backend,
             "durable: an s3 namespace URL must not carry credentials; the URL is logged, \
@@ -254,12 +256,13 @@ impl Namespace {
     /// The `s3` scheme needs the `durable-s3` feature, which is what carries
     /// the HTTP and TLS stack it signs requests with.
     #[cfg(not(feature = "durable-s3"))]
-    fn s3(url: &str) -> Result<Self> {
+    fn s3(_url: &str) -> Result<Self> {
+        // Not quoting the URL: in a build that cannot parse it, nothing has
+        // checked it for credentials yet.
         Err(err(
             Category::Backend,
-            format!(
-                "durable: {url:?} needs the `durable-s3` feature, which is off in this build;                  enable it, or pass your own backend to Namespace::with_backend"
-            ),
+            "durable: an s3:// namespace URL needs the `durable-s3` feature, which is off in \
+             this build; enable it, or pass your own backend to Namespace::with_backend",
         ))
     }
 
@@ -486,6 +489,22 @@ mod test {
             "the refusal repeated the credential: {message}"
         );
         assert!(message.contains("must not carry credentials"), "{message}");
+
+        // A secret key may contain `/`, which ends the bucket before the `@`.
+        for url in [
+            "s3://AKIAIOSFODNN7EXAMPLE:wJalrXUtn/FEMIsecret@my-bucket/durable",
+            "s3://AKIAIOSFODNN7EXAMPLE@my-bucket/durable",
+            "s3://AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMIsecret@my-bucket",
+        ] {
+            let message = s3_location(url)
+                .expect_err("credentials in the URL are not a usable bucket")
+                .to_string();
+            assert!(
+                !message.contains("wJalrXUtn") && !message.contains("AKIAIOSFODNN7EXAMPLE"),
+                "the refusal repeated the credential: {message}"
+            );
+            assert!(message.contains("must not carry credentials"), "{message}");
+        }
 
         // An `@` below the authority is a legal S3 key character and stays one.
         assert_eq!(
