@@ -102,6 +102,16 @@ fn verify_engine_versions(expected: &str, reported: &str) -> Result<()> {
     Ok(())
 }
 
+/// The ClickHouse version the linked engine reports, as `SELECT version()` gives
+/// it.
+///
+/// Opens a temporary in-memory connection, the same as [`crate::execute`]. Use
+/// `SELECT version()` on a connection you already hold if you have one.
+pub fn clickhouse_version() -> Result<String> {
+    let result = crate::execute("SELECT version()", None)?;
+    Ok(result.data_utf8()?.trim().to_string())
+}
+
 #[cfg(test)]
 mod version_guard_tests {
     use super::*;
@@ -115,14 +125,4 @@ mod version_guard_tests {
         assert!(message.contains("26.7.3"));
         assert!(verify_engine_versions("26.11.0-rc.3", "26.11.0-rc.3").is_ok());
     }
-}
-
-/// The ClickHouse version the linked engine reports, as `SELECT version()` gives
-/// it.
-///
-/// Opens a temporary in-memory connection, the same as [`crate::execute`]. Use
-/// `SELECT version()` on a connection you already hold if you have one.
-pub fn clickhouse_version() -> Result<String> {
-    let result = crate::execute("SELECT version()", None)?;
-    Ok(result.data_utf8()?.trim().to_string())
 }
