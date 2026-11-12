@@ -139,9 +139,9 @@ required-features = ["arrow"]
 # .github/scripts/check-engine-pin.sh keeps it in step with build.rs and
 # update_libchdb.sh, which are what actually fetch the engine.
 #
-# This pin is the v26.11.0-rc.2 release candidate, which 2.1.0 is published
-# against. Backup, restore and statement analysis require v26.7.2-rc.2 or newer.
-engine = "v26.11.0-rc.2"
+# v2.1.0 was published against rc.2; this branch tests rc.3 for the next
+# release. Backup, restore and statement analysis require v26.7.2-rc.2 or newer.
+engine = "v26.11.0-rc.3"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.

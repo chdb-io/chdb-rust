@@ -38,8 +38,113 @@
 //! ```
 
 use crate::bindings;
+use crate::connection::Connection;
+use crate::error::Result;
+use crate::format::OutputFormat;
+use crate::query_result::QueryResult;
+use arrow::array::RecordBatchReader;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::ffi_stream::FFI_ArrowArrayStream;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_REGISTRATION: AtomicU64 = AtomicU64::new(0);
+
+/// A scoped, owned Arrow source registered with chDB's process-wide registry.
+///
+/// The reader and its C Stream stay alive until the registration is removed.
+/// Streaming queries borrow this handle mutably, so it cannot be closed or
+/// dropped while such a query is still being consumed. The raw registration
+/// methods remain available for callers managing C Data pointers themselves.
+/// Do not unregister its opaque name through another connection: core's
+/// registry is process-wide and cannot guard against that external action.
+#[must_use = "keep the registration alive until its queries finish"]
+pub struct ArrowRegistration<'a> {
+    conn: &'a mut Connection,
+    name: String,
+    source: Option<Box<FFI_ArrowArrayStream>>,
+    registered: bool,
+}
+
+impl<'a> ArrowRegistration<'a> {
+    pub(crate) fn new(
+        conn: &'a mut Connection,
+        reader: Box<dyn RecordBatchReader + Send>,
+    ) -> Result<Self> {
+        let mut source = Box::new(FFI_ArrowArrayStream::new(reader));
+        let name = format!(
+            "__chdb_rust_{}_{}",
+            std::process::id(),
+            NEXT_REGISTRATION.fetch_add(1, Ordering::Relaxed)
+        );
+        let raw = unsafe { ArrowStream::from_raw(source.as_mut()) };
+        conn.register_arrow_stream(&name, &raw)?;
+        Ok(Self {
+            conn,
+            name,
+            source: Some(source),
+            registered: true,
+        })
+    }
+
+    /// SQL table expression for this source, e.g. `ArrowStream('...')`.
+    pub fn sql_expr(&self) -> String {
+        arrow_stream_table_sql(&self.name)
+    }
+
+    /// Run a synchronous query while the source remains registered.
+    pub fn query(&self, sql: &str, format: OutputFormat) -> Result<QueryResult> {
+        self.conn.query(sql, format)
+    }
+
+    /// Materialize an Arrow result while the source remains registered.
+    pub fn query_arrow(&self, sql: &str) -> Result<crate::arrow_query_stream::ArrowReader> {
+        self.conn.query_arrow(sql)
+    }
+
+    /// Run a lazy Arrow query. The registration cannot be dropped until this
+    /// stream is consumed, cancelled, or dropped.
+    pub fn query_stream_arrow(
+        &mut self,
+        sql: &str,
+    ) -> Result<crate::arrow_query_stream::ArrowQueryStream<'_>> {
+        self.conn.query_stream_arrow(sql)
+    }
+
+    /// Run a lazy text query under the same lifetime constraint.
+    pub fn query_stream(
+        &mut self,
+        sql: &str,
+        format: OutputFormat,
+    ) -> Result<crate::query_stream::QueryStream<'_>> {
+        self.conn.query_stream(sql, format)
+    }
+
+    /// Unregister explicitly, returning an error if the engine refuses it.
+    /// Dropping the handle also unregisters, but cannot report that error.
+    pub fn close(mut self) -> Result<()> {
+        self.unregister()
+    }
+
+    fn unregister(&mut self) -> Result<()> {
+        if self.registered {
+            self.conn.unregister_arrow_table(&self.name)?;
+            self.registered = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ArrowRegistration<'_> {
+    fn drop(&mut self) {
+        if self.unregister().is_err() {
+            // Core may still hold the borrowed pointer. Leaking the source is
+            // preferable to freeing memory that a subsequent scan may read.
+            if let Some(source) = self.source.take() {
+                std::mem::forget(source);
+            }
+        }
+    }
+}
 
 /// Raw Arrow C Data Interface stream pointer expected by `chdb_arrow_scan`.
 pub type RawArrowArrayStream = *mut FFI_ArrowArrayStream;

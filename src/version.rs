@@ -82,6 +82,41 @@ pub fn engine_version() -> Result<&'static str> {
     }
 }
 
+/// A fetched dynamic library may be shadowed by an older runtime installation.
+/// Only compare when the build itself resolved a release: a caller-supplied
+/// CHDB_LIB_DIR has no known version to assert against.
+pub(crate) fn verify_loaded_engine() -> Result<()> {
+    if let Some(expected) = EXPECTED_ENGINE_VERSION {
+        let reported = engine_version()?;
+        verify_engine_versions(expected, reported)?;
+    }
+    Ok(())
+}
+
+fn verify_engine_versions(expected: &str, reported: &str) -> Result<()> {
+    if reported != expected {
+        return Err(Error::InvalidData(format!(
+            "built against chdb-core {expected}, but loaded libchdb reports {reported}; check the runtime library search path"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod version_guard_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_mismatch_names_both_releases() {
+        let message = verify_engine_versions("26.11.0-rc.3", "26.7.3")
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("26.11.0-rc.3"));
+        assert!(message.contains("26.7.3"));
+        assert!(verify_engine_versions("26.11.0-rc.3", "26.11.0-rc.3").is_ok());
+    }
+}
+
 /// The ClickHouse version the linked engine reports, as `SELECT version()` gives
 /// it.
 ///

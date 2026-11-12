@@ -227,3 +227,15 @@ fn a_one_shot_query_with_no_rows_yields_no_batches() {
     let rows: usize = reader.map(|b| b.expect("batch").num_rows()).sum();
     assert_eq!(rows, 0);
 }
+
+#[test]
+fn streamed_empty_result_preserves_schema() {
+    let mut conn = Connection::open_in_memory().expect("open");
+    let mut stream = conn
+        .query_stream_arrow("SELECT number FROM numbers(0)")
+        .expect("start");
+    assert!(stream.next_batch().expect("fetch").is_none());
+    let schema = stream.schema().expect("schema of empty result");
+    assert_eq!(schema.field(0).name(), "number");
+    assert_eq!(schema.field(0).data_type(), &DataType::UInt64);
+}
