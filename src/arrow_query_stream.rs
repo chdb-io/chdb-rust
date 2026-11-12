@@ -10,7 +10,8 @@ use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 use std::os::raw::c_char;
 
-use arrow::ffi::FFI_ArrowSchema;
+use arrow::array::RecordBatchReader;
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
 use arrow::record_batch::RecordBatch;
 
@@ -75,6 +76,7 @@ pub struct ArrowQueryStream<'a> {
     conn: ArrowQueryStreamConnection<'a>,
     inner: *mut bindings::chdb_result,
     finished: bool,
+    schema: Option<arrow::datatypes::SchemaRef>,
 }
 
 impl<'a> ArrowQueryStream<'a> {
@@ -88,6 +90,7 @@ impl<'a> ArrowQueryStream<'a> {
             conn: ArrowQueryStreamConnection::Borrowed(conn),
             inner,
             finished: false,
+            schema: None,
         })
     }
 
@@ -101,6 +104,7 @@ impl<'a> ArrowQueryStream<'a> {
             conn: ArrowQueryStreamConnection::Owned(conn),
             inner,
             finished: false,
+            schema: None,
         })
     }
 
@@ -115,6 +119,7 @@ impl<'a> ArrowQueryStream<'a> {
             conn: ArrowQueryStreamConnection::Borrowed(conn),
             inner,
             finished: false,
+            schema: None,
         })
     }
 
@@ -129,6 +134,7 @@ impl<'a> ArrowQueryStream<'a> {
             conn: ArrowQueryStreamConnection::Owned(conn),
             inner,
             finished: false,
+            schema: None,
         })
     }
 
@@ -232,8 +238,13 @@ impl<'a> ArrowQueryStream<'a> {
 
     /// Fetch the next Arrow record batch from the query stream.
     ///
-    /// Returns `Ok(None)` when the stream is exhausted, including empty result sets
-    /// (libchdb currently returns a null-schema stream for zero-row queries).
+    /// The schema, once fetched, remains available after this returns `None`.
+    /// Older engines may not export a schema for a zero-row result.
+    pub fn schema(&self) -> Option<arrow::datatypes::SchemaRef> {
+        self.schema.clone()
+    }
+
+    /// Returns `Ok(None)` when the stream is exhausted, including empty result sets.
     pub fn next_batch(&mut self) -> Result<Option<RecordBatch>> {
         if self.finished || self.inner.is_null() {
             return Ok(None);
@@ -246,7 +257,6 @@ impl<'a> ArrowQueryStream<'a> {
             unsafe { bindings::chdb_stream_fetch_arrow(self.conn_handle(), self.inner, out_ptr) };
 
         if state != bindings::chdb_state_CHDBSuccess {
-            self.finished = true;
             let err_msg = unsafe { bindings::chdb_result_error(self.inner) };
             let detail = if err_msg.is_null() {
                 "chdb_stream_fetch_arrow failed".to_string()
@@ -255,26 +265,36 @@ impl<'a> ArrowQueryStream<'a> {
                     .to_string_lossy()
                     .into_owned()
             };
+            self.cancel();
             return Err(Error::QueryError(detail));
         }
 
-        if is_empty_result_stream(&ffi_stream) {
-            self.finished = true;
-            return Ok(None);
+        match is_eos_without_schema(&mut ffi_stream) {
+            Ok(true) => {
+                self.finished = true;
+                return Ok(None);
+            }
+            Ok(false) => {}
+            Err(err) => {
+                self.cancel();
+                return Err(err);
+            }
         }
 
         let mut reader = match ArrowArrayStreamReader::try_new(ffi_stream) {
             Ok(reader) => reader,
             Err(e) => {
-                self.finished = true;
+                self.cancel();
                 return Err(Error::QueryError(e.to_string()));
             }
         };
 
+        self.schema = Some(reader.schema());
+
         match reader.next() {
             Some(Ok(batch)) => Ok(Some(batch)),
             Some(Err(e)) => {
-                self.finished = true;
+                self.cancel();
                 Err(Error::QueryError(e.to_string()))
             }
             None => {
@@ -303,16 +323,42 @@ impl<'a> ArrowQueryStream<'a> {
     }
 }
 
-/// libchdb emits a one-batch stream with a null schema for empty result sets;
-/// the stream's `get_schema` callback returns a non-zero code until that is fixed upstream.
-fn is_empty_result_stream(ffi_stream: &FFI_ArrowArrayStream) -> bool {
+/// On older engines EOS may be a stream without a schema. A failed schema
+/// callback alone is not proof of EOS: check get_next before deciding whether
+/// to suppress the error. Both probe objects release themselves on drop.
+fn is_eos_without_schema(ffi_stream: &mut FFI_ArrowArrayStream) -> Result<bool> {
     let Some(get_schema) = ffi_stream.get_schema else {
-        return true;
+        return Err(Error::InvalidData(
+            "Arrow stream has no get_schema callback".into(),
+        ));
     };
     let mut schema = FFI_ArrowSchema::empty();
-    let stream_ptr = (ffi_stream as *const FFI_ArrowArrayStream).cast_mut();
-    let ret_code = unsafe { get_schema(stream_ptr, &mut schema) };
-    ret_code != 0
+    let ret_code = unsafe { get_schema(ffi_stream, &mut schema) };
+    if ret_code == 0 {
+        return Ok(false);
+    }
+
+    let Some(get_next) = ffi_stream.get_next else {
+        return Err(Error::InvalidData(
+            "Arrow stream has no get_next callback".into(),
+        ));
+    };
+    let mut array = FFI_ArrowArray::empty();
+    let next_code = unsafe { get_next(ffi_stream, &mut array) };
+    let detail = ffi_stream.get_last_error.and_then(|get_error| {
+        let ptr = unsafe { get_error(ffi_stream) };
+        (!ptr.is_null()).then(|| {
+            unsafe { CStr::from_ptr(ptr) }
+                .to_string_lossy()
+                .into_owned()
+        })
+    });
+    if next_code == 0 && array.release.is_none() && detail.is_none() {
+        return Ok(true);
+    }
+    Err(Error::QueryError(detail.unwrap_or_else(|| {
+        format!("Arrow stream schema failed ({ret_code}); next batch returned {next_code}")
+    })))
 }
 
 impl Iterator for ArrowQueryStream<'_> {
@@ -340,6 +386,34 @@ mod tests {
     use super::*;
     use crate::session::SessionBuilder;
     use crate::test_utils::tempdir;
+
+    unsafe extern "C" fn failing_schema(
+        _: *mut FFI_ArrowArrayStream,
+        _: *mut FFI_ArrowSchema,
+    ) -> i32 {
+        1
+    }
+
+    unsafe extern "C" fn empty_next(_: *mut FFI_ArrowArrayStream, _: *mut FFI_ArrowArray) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn schema_error(_: *mut FFI_ArrowArrayStream) -> *const c_char {
+        c"invalid schema".as_ptr()
+    }
+
+    #[test]
+    fn schema_error_is_not_silently_treated_as_eof() {
+        let mut stream = FFI_ArrowArrayStream::empty();
+        stream.get_schema = Some(failing_schema);
+        stream.get_next = Some(empty_next);
+        stream.get_last_error = Some(schema_error);
+        let err = is_eos_without_schema(&mut stream).unwrap_err();
+        assert!(err.to_string().contains("invalid schema"));
+
+        stream.get_last_error = None;
+        assert!(is_eos_without_schema(&mut stream).unwrap());
+    }
 
     #[test]
     fn test_arrow_query_stream_row_count_and_chunking() -> Result<()> {

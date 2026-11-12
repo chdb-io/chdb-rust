@@ -11,6 +11,8 @@ use crate::arrow_options::InsertOptions;
 #[cfg(feature = "arrow")]
 use crate::arrow_query_stream::ArrowQueryStream;
 #[cfg(feature = "arrow")]
+use crate::arrow_stream::ArrowRegistration;
+#[cfg(feature = "arrow")]
 use crate::arrow_stream::{ArrowArray, ArrowSchema, ArrowStream};
 use crate::error::{Error, Result};
 use crate::format::{InputFormat, OutputFormat};
@@ -83,6 +85,7 @@ impl Connection {
     /// Returns [`Error::ConnectionFailed`] if the
     /// connection cannot be established.
     pub fn open(args: &[&str]) -> Result<Self> {
+        crate::version::verify_loaded_engine()?;
         // A post-shutdown connect fails inside the engine as a null connection
         // and nothing else, so it is caught here where the reason is known.
         crate::runtime::ensure_running()?;
@@ -329,8 +332,8 @@ impl Connection {
 
     /// Execute a query and take the whole result as one Arrow stream.
     ///
-    /// Zero-copy where the engine can manage it: no IPC serialization and no
-    /// compression round-trip. Prefer
+    /// No Arrow IPC serialization or compression round-trip; conversion of
+    /// ClickHouse columns into Arrow buffers may still copy data. Prefer
     /// [`query_stream_arrow`](Self::query_stream_arrow) when the result is too
     /// large to hold at once.
     ///
@@ -576,6 +579,19 @@ impl Connection {
         opts: Option<&ArrowOptions>,
     ) -> Result<ArrowQueryStream<'a>> {
         ArrowQueryStream::start_borrowed_with_params(self, sql, params, opts)
+    }
+
+    /// Register an owned Arrow reader for queries within a scoped lifetime.
+    ///
+    /// The returned handle generates a process-unique name and unregisters on
+    /// close or drop. Use its `sql_expr()` in SQL and run the query through the
+    /// handle so lazy results cannot outlive the input reader.
+    #[cfg(feature = "arrow")]
+    pub fn register_arrow_reader(
+        &mut self,
+        reader: Box<dyn arrow::array::RecordBatchReader + Send>,
+    ) -> Result<ArrowRegistration<'_>> {
+        ArrowRegistration::new(self, reader)
     }
 
     #[cfg(feature = "arrow")]

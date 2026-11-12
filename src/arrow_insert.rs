@@ -16,7 +16,7 @@ use arrow::ffi_stream::FFI_ArrowArrayStream;
 use crate::arrow_options::InsertOptions;
 use crate::arrow_stream::{arrow_stream_table_sql, ArrowArray, ArrowSchema, ArrowStream};
 use crate::connection::Connection;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::format::OutputFormat;
 
 #[cfg(not(direct_arrow_insert))]
@@ -100,8 +100,17 @@ fn insert_via_registered_array(
 ) -> Result<()> {
     conn.register_arrow_array(stream_name, arrow_schema, arrow_array)?;
     let result = insert_from_registered(conn, dest_table, stream_name, columns, options);
-    conn.unregister_arrow_table(stream_name)?;
-    result
+    finish_registered_insert(result, conn.unregister_arrow_table(stream_name))
+}
+
+fn finish_registered_insert(result: Result<()>, cleanup: Result<()>) -> Result<()> {
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(err), Ok(())) | (Ok(()), Err(err)) => Err(err),
+        (Err(err), Err(cleanup_err)) => Err(Error::QueryError(format!(
+            "{err}; Arrow source cleanup also failed: {cleanup_err}"
+        ))),
+    }
 }
 
 /// Insert a single [`RecordBatch`] into `dest_table` via `register_arrow_array`.
@@ -339,7 +348,6 @@ pub fn insert_record_batch_reader(
     {
         conn.register_arrow_stream(stream_name, &arrow_stream)?;
         let result = insert_from_registered(conn, dest_table, stream_name, &columns, &options);
-        conn.unregister_arrow_table(stream_name)?;
-        result
+        finish_registered_insert(result, conn.unregister_arrow_table(stream_name))
     }
 }

@@ -16,9 +16,9 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust.
 - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 - **Query result streaming**: Read large result sets in chunks with constant memory
 - **Streaming INSERT**: push rows in chunks in any input format, with engine backpressure; the stream also implements `std::io::Write`
-- **Arrow bulk insert** (feature `arrow`, on by default): register in-memory Arrow data and insert via `ArrowStream('name')`
+- **Arrow bulk insert** (feature `arrow`, on by default): register in-memory Arrow data and insert via `ArrowStream('name')`; `Connection::register_arrow_reader` offers an owned, scoped source for queries
 - **Arrow batch streaming** (with the `arrow` feature): stream query results as `RecordBatch` values via the Arrow C Data Interface
-- **One-shot Arrow export** (with the `arrow` feature): take a whole result as an Arrow stream, zero-copy where possible
+- **One-shot Arrow export** (with the `arrow` feature): take a whole result as an Arrow stream without Arrow IPC; conversion between ClickHouse and Arrow buffers may still copy data
 - **Thread-safe**: Connections and results can be safely sent between threads
 - **Version accessors**: which chdb-core release is linked, where it came from, and which ClickHouse it carries
 - **Backup, restore and statement analysis**: the chdb-core management ABI, on any engine that exports it
