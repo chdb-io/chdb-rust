@@ -141,7 +141,7 @@ required-features = ["arrow"]
 #
 # v2.1.0 was published against rc.2; this branch tests rc.3 for the next
 # release. Backup, restore and statement analysis require v26.7.2-rc.2 or newer.
-engine = "v26.11.0-rc.3"
+engine = "v26.11.1"
 
 [package.metadata.docs.rs]
 # docs.rs cannot download libchdb or link native libraries.
