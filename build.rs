@@ -14,8 +14,25 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_durable_abi)");
 
     if env::var("DOCS_RS").is_ok() {
-        // docs.rs links no engine, but the version accessors still have to
-        // compile, and they read their provenance out of the environment.
+        // docs.rs cannot download or link libchdb. Generate the declarations
+        // from the matching release header shipped inside the crate instead.
+        // Update that snapshot when moving CHDB_ENGINE_PIN; the docs CI step
+        // checks the header's version against the pin.
+        // This also keeps the public API visible in rustdoc without passing a
+        // docsrs cfg to every dependency.
+        let header = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/chdb-ffi-v26.11.1.h");
+        let expected = format!(
+            "#define CHDB_VERSION \"{}\"",
+            CHDB_ENGINE_PIN.trim_start_matches('v')
+        );
+        assert!(
+            fs::read_to_string(&header)
+                .expect("bundled docs.rs chdb.h is missing")
+                .contains(&expected),
+            "bundled docs.rs chdb.h must match {CHDB_ENGINE_PIN}"
+        );
+        let out_path = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is required"));
+        generate_bindings(&header, &out_path);
         publish_engine_provenance(None, "none: docs.rs build", Path::new(""));
         return;
     }

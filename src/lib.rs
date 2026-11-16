@@ -28,13 +28,13 @@
 //! - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 //! - **Query result streaming**: Read large result sets in chunks with constant memory
 //! - **Streaming INSERT** ([`insert_stream`]): push rows in chunks in any input format, with engine backpressure; the stream also implements [`std::io::Write`]
-//! - **Arrow bulk insert** (feature `arrow`, on by default): [`insert_record_batch`] via `ArrowStream('name')`. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
+//! - **Arrow input and bulk insert** (feature `arrow`, on by default): [`connection::Connection::register_arrow_reader`] creates a scoped SQL source; [`insert_record_batch_direct`] and [`insert_record_batch_reader`] write Arrow data. Use [`chdb_rust::arrow`](arrow) types so your Arrow version matches the crate.
 //! - **Arrow batch streaming** (with the `arrow` feature): Stream query results as `RecordBatch` values via the Arrow C Data Interface
 //! - **One-shot Arrow export** (with the `arrow` feature): take a whole result as one Arrow stream via [`connection::Connection::query_arrow`], with [`arrow_options::ArrowOptions`] controlling the type mapping on both the one-shot and streaming paths
 //! - **Thread-safe**: Connections and results can be safely sent between threads
 //! - **Version accessors** ([`version`]): which chdb-core release is linked, where it came from, and which ClickHouse it carries
-//! - **Backup, restore and statement analysis** ([`admin`]): the chdb-core management ABI, on any engine that exports it
-//! - **Durable objects** (feature `durable`, [`durable`]): a database whose authoritative state is a checkpoint plus a statement WAL in storage you own
+//! - **Backup, restore and statement analysis** (admin module): the chdb-core management ABI, on any engine that exports it
+//! - **Durable objects** (feature `durable`): a database whose authoritative state is a checkpoint plus a statement WAL in storage you own
 //! - **Runtime control** ([`runtime`]): decline chDB's process-wide signal handlers, and shut the engine down cleanly so no engine thread outlives your teardown
 //!
 //! ## Examples
