@@ -1,15 +1,21 @@
 //! Durable objects against a real S3-compatible bucket.
 //!
-//! Everything here is skipped unless `CHDB_DURABLE_S3_BUCKET` names one, so a
-//! machine without credentials still runs the rest of the suite. Point it at a
-//! bucket you own:
+//! Everything here is `#[ignore]`d, so a machine without a bucket runs the rest
+//! of the suite and reports these as ignored rather than as passing. They are
+//! opted into with `--ignored`. Point them at a bucket you own:
 //!
 //! ```sh
 //! eval "$(aws configure export-credentials --profile my-profile --format env)"
 //! export CHDB_DURABLE_S3_BUCKET=my-bucket
 //! export CHDB_DURABLE_S3_REGION=eu-central-1
-//! cargo test --features durable-s3 --test durable_s3 -- --test-threads=1
+//! cargo test --features durable-s3 --test durable_s3 -- --test-threads=1 --ignored
 //! ```
+//!
+//! `#[ignore]` rather than a run-time skip alone: libtest swallows the stderr of
+//! a test that passes, so a skipped run printed nothing and still summarised as
+//! `8 passed`, which is the one thing a suite guarding the single-writer
+//! guarantee must not do. `require_bucket!` stays as the second half of the
+//! guard, for an `--ignored` run on a machine that has no bucket after all.
 //!
 //! `CHDB_DURABLE_S3_ENDPOINT` points the same tests at MinIO or R2.
 //!
@@ -116,8 +122,9 @@ fn namespace(prefix: &str) -> Option<Namespace> {
     )
 }
 
-/// Prints why a test did nothing, so a skipped run does not read as a passing
-/// one.
+/// Bails out of an `--ignored` run on a machine that turns out to have no
+/// bucket. `#[ignore]` on each test is what keeps an ordinary run from reading
+/// these as passing; this only covers the case where they were asked for.
 macro_rules! require_bucket {
     ($value:expr) => {
         match $value {
@@ -131,6 +138,7 @@ macro_rules! require_bucket {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_conditional_create_lets_exactly_one_writer_win() {
     let backend = require_bucket!(backend(&prefix("create")));
 
@@ -160,6 +168,7 @@ fn a_conditional_create_lets_exactly_one_writer_win() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_compare_and_swap_refuses_a_stale_token() {
     let backend = require_bucket!(backend(&prefix("cas")));
 
@@ -208,6 +217,7 @@ fn a_compare_and_swap_refuses_a_stale_token() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn an_absent_key_is_an_answer_rather_than_a_failure() {
     let backend = require_bucket!(backend(&prefix("absent")));
     assert!(backend.get_bytes(HEAD_KEY).expect("a read").is_none());
@@ -219,6 +229,7 @@ fn an_absent_key_is_an_answer_rather_than_a_failure() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_file_is_uploaded_whole_and_streams_back() {
     use std::io::Read as _;
 
@@ -251,6 +262,7 @@ fn a_file_is_uploaded_whole_and_streams_back() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_database_survives_in_a_bucket() {
     let _engine = engine();
     let prefix = prefix("roundtrip");
@@ -325,6 +337,7 @@ fn a_database_survives_in_a_bucket() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_second_writer_finds_the_lease_held() {
     let _engine = engine();
     let prefix = prefix("lease");
@@ -360,6 +373,7 @@ fn a_second_writer_finds_the_lease_held() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_reader_sees_what_a_writer_committed_and_takes_no_lease() {
     let _engine = engine();
     let prefix = prefix("reader");
@@ -401,6 +415,7 @@ fn a_reader_sees_what_a_writer_committed_and_takes_no_lease() {
 }
 
 #[test]
+#[ignore = "needs a real bucket: set CHDB_DURABLE_S3_BUCKET and run with --ignored"]
 fn a_read_only_open_of_a_prefix_nobody_has_written_is_not_found() {
     let _engine = engine();
     let namespace = require_bucket!(namespace(&prefix("missing")));
