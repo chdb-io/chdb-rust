@@ -47,6 +47,11 @@ jobs:
     - name: Check clippy
       if: matrix.os == 'ubuntu-latest'
       run: cargo clippy --all-targets -- --deny warnings
+    # docs.rs sets DOCS_RS but does not download or link libchdb. Build from
+    # the packaged C header and reject broken API links before publishing.
+    - name: Check docs.rs-style documentation
+      if: matrix.os == 'ubuntu-latest'
+      run: DOCS_RS=1 RUSTDOCFLAGS='-D rustdoc::broken_intra_doc_links' cargo doc --no-deps --features arrow
     - name: Build
       run: cargo build --verbose
       env:

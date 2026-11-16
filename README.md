@@ -16,7 +16,7 @@ Experimental [chDB](https://github.com/chdb-io/chdb) FFI bindings for Rust.
 - **Multiple output formats**: JSON, CSV, TabSeparated, and more
 - **Query result streaming**: Read large result sets in chunks with constant memory
 - **Streaming INSERT**: push rows in chunks in any input format, with engine backpressure; the stream also implements `std::io::Write`
-- **Arrow bulk insert** (feature `arrow`, on by default): register in-memory Arrow data and insert via `ArrowStream('name')`; `Connection::register_arrow_reader` offers an owned, scoped source for queries
+- **Arrow input and bulk insert** (feature `arrow`, on by default): use `Connection::register_arrow_reader` for a scoped SQL source, or `insert_record_batch_direct` / `insert_record_batch_reader` to write Arrow data; the raw registration APIs remain available for callers managing C Data pointers
 - **Arrow batch streaming** (with the `arrow` feature): stream query results as `RecordBatch` values via the Arrow C Data Interface
 - **One-shot Arrow export** (with the `arrow` feature): take a whole result as an Arrow stream without Arrow IPC; conversion between ClickHouse and Arrow buffers may still copy data
 - **Arrow documentation map**: [choose the Rust Arrow guide, runnable example, IPC route, or ADBC alternative](docs/arrow.md)
@@ -42,7 +42,7 @@ Add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "2.1"
+chdb-rust = "2.2"
 ```
 
 The library will automatically download the required `libchdb` binary during the build process.
@@ -309,7 +309,7 @@ use chdb_rust::arrow::datatypes::{DataType, Field, Schema};
 SQL-only users can disable it to avoid building Arrow:
 
 ```toml
-chdb-rust = { version = "2.1", default-features = false }
+chdb-rust = { version = "2.2", default-features = false }
 ```
 
 See [docs/examples.md](docs/examples.md#fast-bulk-inserts-arrow) for usage, or run:

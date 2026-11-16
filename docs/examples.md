@@ -24,10 +24,10 @@ First, add `chdb-rust` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chdb-rust = "2.1"
+chdb-rust = "2.2"
 ```
 
-Make sure you have `libchdb` installed on your system. See the main README for installation instructions.
+By default, the build downloads the matching `chdb-core v26.11.1` library and header. See the main README if you prefer to provide a matching `libchdb` yourself.
 
 ## Stateless Queries
 
@@ -379,19 +379,18 @@ fn main() -> Result<(), chdb_rust::error::Error> {
 
 ## Fast Bulk Inserts (Arrow)
 
-For high throughput and low latency, register in-memory Arrow data and insert with `INSERT ... SELECT` from the `ArrowStream` table function. This avoids temp-file Arrow IPC and SQL `VALUES` parsing.
+For bulk ingest, use the high-level helpers with in-memory Arrow data. They avoid temp-file Arrow IPC and SQL `VALUES` parsing. The raw registration APIs are for callers that need to manage the C Data pointers and their lifetimes themselves.
 
-### Ranked ingest paths
+### Choose an ingest path
 
-| Rank | Method | Notes |
-|------|--------|-------|
-| 1 | `register_arrow_stream` + `INSERT INTO dest SELECT * FROM ArrowStream('n')` | Multi-batch; no disk hop |
-| 2 | `register_arrow_array` + same SQL | Single `RecordBatch` |
-| 3 | `file(path, 'Native')` | Pre-encoded Native files |
-| 4 | `file(path, 'RowBinary')` | Dense binary; requires `structure` in SQL |
-| 5 | `file(path, 'ArrowStream')` | Arrow IPC on disk |
-| 6 | `file(path, 'Parquet')` | Cold bulk loads |
-| 7 | `INSERT ... VALUES` | Fine for demos; worst at scale |
+| Input | Recommended Rust API | Notes |
+|------|----------------------|-------|
+| One `RecordBatch` | `insert_record_batch_direct` | Uses direct FFI when the engine provides it, otherwise a scoped registration and SQL insert. |
+| Several in-memory batches | `insert_record_batches` | All batches share one schema. |
+| An existing lazy `RecordBatchReader` | `insert_record_batch_reader` | The reader is consumed once. |
+| Raw C Data stream or schema/array | `register_arrow_stream` / `register_arrow_array` | Advanced path: keep the FFI objects and buffers alive until the query completes and unregister explicitly. |
+
+Other formats such as Native, RowBinary, Arrow IPC and Parquet files remain available when the input is already encoded that way; they are not the direct in-memory Arrow path.
 
 `OutputFormat` on `query()` / `execute()` affects **result** encoding only, not ingest speed.
 
@@ -600,7 +599,7 @@ An INSERT statement can carry `{name:Type}` placeholders too — see
 
 ## One-Shot Arrow Export
 
-`Connection::query_arrow` takes a whole result as an Arrow stream, zero-copy where the engine can manage it — no IPC serialization and no compression round-trip. It returns an `ArrowReader` that implements both `Iterator` and `arrow::array::RecordBatchReader`:
+`Connection::query_arrow` takes a whole result as an Arrow stream without an IPC serialization or compression round-trip. Conversion from ClickHouse columns into Arrow buffers may still copy data. It returns an `ArrowReader` that implements both `Iterator` and `arrow::array::RecordBatchReader`:
 
 ```rust
 use arrow::array::RecordBatchReader;
